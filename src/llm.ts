@@ -61,7 +61,7 @@ async function callOpenAI(env: Env, instructions: string, input: unknown): Promi
     },
     body: JSON.stringify({
       model: env.LLM_MODEL,
-      reasoning: { effort: "medium" },
+      reasoning: { effort: env.LLM_REASONING_EFFORT },
       instructions,
       input: `Данные активности за неделю (JSON):\n${JSON.stringify(input)}`,
       text: {
@@ -94,10 +94,10 @@ async function callOpenAI(env: Env, instructions: string, input: unknown): Promi
 async function callVercel(env: Env, instructions: string, input: unknown): Promise<LlmResult> {
   const gateway = createGateway({ apiKey: env.VERCEL_AI_GATEWAY_API_KEY });
   const { output } = await generateText({
-    model: gateway(`openai/${env.LLM_MODEL}`),
+    model: gateway(env.LLM_MODEL),
     instructions,
     prompt: `Данные активности за неделю (JSON):\n${JSON.stringify(input)}`,
-    reasoning: "medium",
+    reasoning: env.LLM_REASONING_EFFORT,
     output: Output.object({ schema: jsonSchema<LlmResult>(SCHEMA) }),
   });
   return output;
