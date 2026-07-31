@@ -14,6 +14,9 @@ export interface RepoActivity {
   commits: CommitInfo[];
   additions: number;
   deletions: number;
+  ciSuccess: number;
+  ciFailure: number;
+  deployments: number;
 }
 
 export interface PrInfo {

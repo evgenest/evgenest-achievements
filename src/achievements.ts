@@ -58,6 +58,22 @@ const DEFS: AchievementDef[] = [
     test: (w) => w.totalAdditions >= 1000,
   },
   {
+    id: "deployer",
+    title: "В продакшен!",
+    description: "Деплой за неделю",
+    test: (w) => w.repos.reduce((s, r) => s + r.deployments, 0) >= 1,
+  },
+  {
+    id: "green-week",
+    title: "Зелёная неделя",
+    description: "5+ CI-прогонов, все успешные",
+    test: (w) => {
+      const ok = w.repos.reduce((s, r) => s + r.ciSuccess, 0);
+      const fail = w.repos.reduce((s, r) => s + r.ciFailure, 0);
+      return ok >= 5 && fail === 0;
+    },
+  },
+  {
     id: "streak-4",
     title: "Месяц в строю",
     description: "4 активные недели подряд",

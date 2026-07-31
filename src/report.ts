@@ -42,6 +42,11 @@ export function buildReport({ week, state, newStreak, achievements, llm }: Repor
   lines.push(`| Issues | ${num(week.issues.length)} | ${delta(week.issues.length, prev?.issues)} |`);
   lines.push(`| Строк добавлено | ${num(week.totalAdditions)} | ${delta(week.totalAdditions, prev?.additions)} |`);
   lines.push(`| Строк удалено | ${num(week.totalDeletions)} | ${delta(week.totalDeletions, prev?.deletions)} |`);
+  const ciSuccess = week.repos.reduce((s, r) => s + r.ciSuccess, 0);
+  const ciFailure = week.repos.reduce((s, r) => s + r.ciFailure, 0);
+  const deployments = week.repos.reduce((s, r) => s + r.deployments, 0);
+  lines.push(`| CI-прогоны (успешные/упавшие) | ${num(ciSuccess)} / ${num(ciFailure)} | — |`);
+  lines.push(`| Деплои | ${num(deployments)} | — |`);
   lines.push(`| Активных проектов | ${num(week.repos.length)} | — |`);
   lines.push("");
 

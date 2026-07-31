@@ -1,3 +1,4 @@
+import { buildLlmPayload } from "./sanitize";
 import type { AppState, LlmResult, WeekActivity } from "./types";
 
 const SCHEMA = {
@@ -50,16 +51,8 @@ function systemPrompt(env: Env): string {
 }
 
 export async function generateInsights(env: Env, week: WeekActivity, state: AppState, newStreak: number): Promise<LlmResult> {
-  const input = {
-    week,
-    context: {
-      weekNumber: state.reportCount + 1,
-      streakWeeks: newStreak,
-      bestStreak: state.bestStreak,
-      allTime: state.allTime,
-      lastWeek: state.lastWeek,
-    },
-  };
+  // Через границу в OpenAI данные проходят ТОЛЬКО через страж (см. sanitize.ts)
+  const input = buildLlmPayload(week, state, newStreak);
 
   const res = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",

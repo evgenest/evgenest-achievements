@@ -93,6 +93,35 @@ async function fetchCommits(env: Env, repos: RestRepo[], since: string): Promise
   return result;
 }
 
+const MAX_CI_REPOS = 10; // лимит субзапросов Workers: Actions/Deployments API только per-repo
+
+interface WorkflowRun {
+  conclusion: string | null;
+}
+
+/** Сводка CI-прогонов и деплоев по репо за неделю. */
+async function fetchOps(
+  env: Env,
+  fullName: string,
+  sinceIso: string,
+): Promise<{ ciSuccess: number; ciFailure: number; deployments: number }> {
+  const sinceDay = sinceIso.slice(0, 10);
+  const [runsRes, deploysRes] = await Promise.allSettled([
+    rest<{ workflow_runs: WorkflowRun[] }>(
+      env,
+      `/repos/${fullName}/actions/runs?created=${encodeURIComponent(`>=${sinceDay}`)}&per_page=100`,
+    ),
+    rest<{ created_at: string }[]>(env, `/repos/${fullName}/deployments?per_page=30`),
+  ]);
+  const runs = runsRes.status === "fulfilled" ? runsRes.value.workflow_runs : [];
+  const deploys = deploysRes.status === "fulfilled" ? deploysRes.value : [];
+  return {
+    ciSuccess: runs.filter((r) => r.conclusion === "success").length,
+    ciFailure: runs.filter((r) => r.conclusion === "failure").length,
+    deployments: deploys.filter((d) => d.created_at >= sinceIso).length,
+  };
+}
+
 interface SearchItem {
   title: string;
   html_url: string;
@@ -126,20 +155,27 @@ export async function collectWeekActivity(env: Env, since: Date, until: Date): P
     searchIssues(env, `author:${env.GITHUB_USER} type:issue updated:>=${sinceDay}`),
   ]);
 
-  const repos: RepoActivity[] = active
-    .map((r) => {
-      const commits = commitsByRepo.get(r.full_name) ?? [];
-      return {
-        fullName: r.full_name,
-        isPrivate: r.private,
-        language: r.language,
-        url: r.html_url,
-        commits,
-        additions: commits.reduce((s, c) => s + c.additions, 0),
-        deletions: commits.reduce((s, c) => s + c.deletions, 0),
-      };
-    })
-    .filter((r) => r.commits.length > 0);
+  const withCommits = active.filter((r) => (commitsByRepo.get(r.full_name) ?? []).length > 0);
+  const opsByRepo = new Map(
+    await Promise.all(
+      withCommits.slice(0, MAX_CI_REPOS).map(async (r) => [r.full_name, await fetchOps(env, r.full_name, sinceIso)] as const),
+    ),
+  );
+
+  const repos: RepoActivity[] = withCommits.map((r) => {
+    const commits = commitsByRepo.get(r.full_name) ?? [];
+    const ops = opsByRepo.get(r.full_name) ?? { ciSuccess: 0, ciFailure: 0, deployments: 0 };
+    return {
+      fullName: r.full_name,
+      isPrivate: r.private,
+      language: r.language,
+      url: r.html_url,
+      commits,
+      additions: commits.reduce((s, c) => s + c.additions, 0),
+      deletions: commits.reduce((s, c) => s + c.deletions, 0),
+      ...ops,
+    };
+  });
 
   const prs: PrInfo[] = prItems.map((i) => ({
     title: i.title,
