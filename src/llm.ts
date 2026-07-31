@@ -1,3 +1,5 @@
+import { createGateway } from "@ai-sdk/gateway";
+import { generateText, jsonSchema, Output } from "ai";
 import { buildLlmPayload } from "./sanitize";
 import type { AppState, LlmResult, WeekActivity } from "./types";
 
@@ -50,10 +52,7 @@ function systemPrompt(env: Env): string {
 - Если неделя пустая или почти пустая: бережный тон, отдых и пауза — нормальная часть работы, без стыда и упрёков.`;
 }
 
-export async function generateInsights(env: Env, week: WeekActivity, state: AppState, newStreak: number): Promise<LlmResult> {
-  // Через границу в OpenAI данные проходят ТОЛЬКО через страж (см. sanitize.ts)
-  const input = buildLlmPayload(week, state, newStreak);
-
+async function callOpenAI(env: Env, instructions: string, input: unknown): Promise<LlmResult> {
   const res = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
@@ -61,9 +60,9 @@ export async function generateInsights(env: Env, week: WeekActivity, state: AppS
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "gpt-5.6-luna",
+      model: env.LLM_MODEL,
       reasoning: { effort: "medium" },
-      instructions: systemPrompt(env),
+      instructions,
       input: `Данные активности за неделю (JSON):\n${JSON.stringify(input)}`,
       text: {
         format: {
@@ -88,4 +87,26 @@ export async function generateInsights(env: Env, week: WeekActivity, state: AppS
     throw new Error(`OpenAI: no output_text in response: ${JSON.stringify(data).slice(0, 500)}`);
   }
   return JSON.parse(text) as LlmResult;
+}
+
+// Vercel AI Gateway: единая точка оплаты и роутинга к тем же моделям OpenAI,
+// когда напрямую платить OpenAI неудобно.
+async function callGateway(env: Env, instructions: string, input: unknown): Promise<LlmResult> {
+  const gateway = createGateway({ apiKey: env.VERCEL_AI_GATEWAY_API_KEY });
+  const { output } = await generateText({
+    model: gateway(`openai/${env.LLM_MODEL}`),
+    instructions,
+    prompt: `Данные активности за неделю (JSON):\n${JSON.stringify(input)}`,
+    reasoning: "medium",
+    output: Output.object({ schema: jsonSchema<LlmResult>(SCHEMA) }),
+  });
+  return output;
+}
+
+export async function generateInsights(env: Env, week: WeekActivity, state: AppState, newStreak: number): Promise<LlmResult> {
+  // Через границу в LLM данные проходят ТОЛЬКО через страж (см. sanitize.ts)
+  const input = buildLlmPayload(week, state, newStreak);
+  const instructions = systemPrompt(env);
+
+  return env.LLM_PROVIDER === "gateway" ? callGateway(env, instructions, input) : callOpenAI(env, instructions, input);
 }
