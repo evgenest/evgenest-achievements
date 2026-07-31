@@ -6,7 +6,7 @@
 
 - **Cloudflare Worker** + cron trigger (пятница утром, UTC)
 - **GitHub API**: REST (список репо, search PR/issues, коммит отчёта) + GraphQL (коммиты со статистикой одним запросом)
-- **LLM**: OpenAI Responses API напрямую ИЛИ через Vercel AI Gateway (`@ai-sdk/gateway` + `ai`) — переключается переменной `LLM_PROVIDER` (`openai` / `vercel`), модель одна и та же (`LLM_MODEL`, reasoning effort medium, structured output)
+- **LLM**: OpenAI Responses API напрямую ИЛИ через Vercel AI Gateway (`@ai-sdk/gateway` + `ai`) — переключается переменной `LLM_PROVIDER` (`openai` / `vercel`); модель и глубина рассуждений настраиваются переменными `LLM_MODEL` и `LLM_REASONING_EFFORT` (structured output в обоих случаях)
 - **Workers KV**: стрик, all-time тоталы, разблокированные ачивки, снапшот прошлой недели
 - **Telegram Bot API**: исходящий `sendMessage`, без webhook
 
@@ -36,7 +36,7 @@ GitHub-токен имеет право читать код, но приложе
 
 ## Настройка
 
-Vars в `wrangler.jsonc`: `GITHUB_USER`, `REPORTS_REPO` (`<owner>/<repo>` для отчётов), `REPORT_LANG`, `DEV_PROFILE` (профиль разработчика для оценки зарплаты), `LLM_PROVIDER` (`openai` — напрямую в OpenAI, `vercel` — через Vercel AI Gateway), `LLM_MODEL` (модель, без префикса провайдера).
+Vars в `wrangler.jsonc`: `GITHUB_USER`, `REPORTS_REPO` (`<owner>/<repo>` для отчётов), `REPORT_LANG`, `DEV_PROFILE` (профиль разработчика для оценки зарплаты), `LLM_PROVIDER` (`openai` — напрямую в OpenAI, `vercel` — через Vercel AI Gateway), `LLM_MODEL` (формат зависит от `LLM_PROVIDER`: `vercel` — `provider/model`, напр. `nvidia/nemotron-3-ultra-550b-a55b`; `openai` — голое имя модели, напр. `gpt-5.6-luna`), `LLM_REASONING_EFFORT` (`none`/`low`/`medium`/`high`/`xhigh` — модель может поддерживать не все уровни; если модель поддерживает только toggle вкл/выкл, AI SDK сводит значение к ближайшему поддерживаемому).
 
 Секреты (`wrangler secret put <NAME>`):
 
