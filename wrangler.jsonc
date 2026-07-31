@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "evgenest-achievements",
+  "main": "src/index.ts",
+  "account_id": "REDACTED_ACCOUNT_ID",
+  "compatibility_date": "2026-07-31",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "triggers": {
+    // Пятница 07:00 UTC = 09:00 Берлин летом / 08:00 зимой
+    "crons": ["0 7 * * 5"]
+  },
+  "kv_namespaces": [
+    {
+      "binding": "STATE",
+      "id": "REDACTED_KV_NAMESPACE_ID"
+    }
+  ],
+  "vars": {
+    "GITHUB_USER": "evgenest",
+    "REPORTS_REPO": "evgenest/evgenest-achievements",
+    "REPORT_LANG": "ru",
+    "DEV_PROFILE": "Fullstack TypeScript/JavaScript developer based in Leipzig, Germany. Works with Cloudflare Workers, Node.js/Bun, React/Next.js, Telegram bots, AI/LLM integrations."
+  }
+}
