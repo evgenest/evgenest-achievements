@@ -6,7 +6,7 @@
 
 - **Cloudflare Worker** + cron trigger (пятница утром, UTC)
 - **GitHub API**: REST (список репо, search PR/issues, коммит отчёта) + GraphQL (коммиты со статистикой одним запросом)
-- **LLM**: OpenAI Responses API напрямую ИЛИ через Vercel AI Gateway (`@ai-sdk/gateway` + `ai`) — переключается переменной `LLM_PROVIDER`, модель одна и та же (`LLM_MODEL`, reasoning effort medium, structured output)
+- **LLM**: OpenAI Responses API напрямую ИЛИ через Vercel AI Gateway (`@ai-sdk/gateway` + `ai`) — переключается переменной `LLM_PROVIDER` (`openai` / `vercel`), модель одна и та же (`LLM_MODEL`, reasoning effort medium, structured output)
 - **Workers KV**: стрик, all-time тоталы, разблокированные ачивки, снапшот прошлой недели
 - **Telegram Bot API**: исходящий `sendMessage`, без webhook
 
@@ -36,7 +36,7 @@ GitHub-токен имеет право читать код, но приложе
 
 ## Настройка
 
-Vars в `wrangler.jsonc`: `GITHUB_USER`, `REPORTS_REPO` (`<owner>/<repo>` для отчётов), `REPORT_LANG`, `DEV_PROFILE` (профиль разработчика для оценки зарплаты), `LLM_PROVIDER` (`openai` — напрямую в OpenAI, `gateway` — через Vercel AI Gateway), `LLM_MODEL` (модель, без префикса провайдера).
+Vars в `wrangler.jsonc`: `GITHUB_USER`, `REPORTS_REPO` (`<owner>/<repo>` для отчётов), `REPORT_LANG`, `DEV_PROFILE` (профиль разработчика для оценки зарплаты), `LLM_PROVIDER` (`openai` — напрямую в OpenAI, `vercel` — через Vercel AI Gateway), `LLM_MODEL` (модель, без префикса провайдера).
 
 Секреты (`wrangler secret put <NAME>`):
 
@@ -44,7 +44,7 @@ Vars в `wrangler.jsonc`: `GITHUB_USER`, `REPORTS_REPO` (`<owner>/<repo>` для
 |---|---|
 | `GITHUB_TOKEN` | Fine-grained PAT: чтение всех репо + contents read/write для репо с отчётами |
 | `OPENAI_API_KEY` | Ключ OpenAI API — нужен только при `LLM_PROVIDER=openai` |
-| `VERCEL_AI_GATEWAY_API_KEY` | Ключ Vercel AI Gateway — нужен только при `LLM_PROVIDER=gateway` |
+| `VERCEL_AI_GATEWAY_API_KEY` | Ключ Vercel AI Gateway — нужен только при `LLM_PROVIDER=vercel` |
 | `TELEGRAM_BOT_TOKEN` | Токен бота от @BotFather |
 | `TELEGRAM_CHAT_ID` | ID чата с ботом (написать боту /start, взять из `getUpdates`) |
 | `RUN_SECRET` | Произвольная строка для ручного запуска |
@@ -58,7 +58,7 @@ bun run check     # tsc --noEmit
 bun run deploy
 ```
 
-Ручной прогон (тест): `GET https://<worker-url>/run?key=<RUN_SECRET>`, опционально `&date=YYYY-MM-DD` — неделя, оканчивающаяся этой датой.
+Ручной прогон (тест): `curl -H "Authorization: Bearer <RUN_SECRET>" https://<worker-url>/run`, опционально `?date=YYYY-MM-DD` — неделя, оканчивающаяся этой датой.
 
 ## Roadmap
 

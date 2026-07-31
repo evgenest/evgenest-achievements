@@ -91,7 +91,7 @@ async function callOpenAI(env: Env, instructions: string, input: unknown): Promi
 
 // Vercel AI Gateway: единая точка оплаты и роутинга к тем же моделям OpenAI,
 // когда напрямую платить OpenAI неудобно.
-async function callGateway(env: Env, instructions: string, input: unknown): Promise<LlmResult> {
+async function callVercel(env: Env, instructions: string, input: unknown): Promise<LlmResult> {
   const gateway = createGateway({ apiKey: env.VERCEL_AI_GATEWAY_API_KEY });
   const { output } = await generateText({
     model: gateway(`openai/${env.LLM_MODEL}`),
@@ -108,5 +108,5 @@ export async function generateInsights(env: Env, week: WeekActivity, state: AppS
   const input = buildLlmPayload(week, state, newStreak);
   const instructions = systemPrompt(env);
 
-  return env.LLM_PROVIDER === "gateway" ? callGateway(env, instructions, input) : callOpenAI(env, instructions, input);
+  return env.LLM_PROVIDER === "vercel" ? callVercel(env, instructions, input) : callOpenAI(env, instructions, input);
 }

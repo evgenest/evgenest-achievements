@@ -20,7 +20,8 @@ export default {
     if (url.pathname !== "/run") {
       return new Response("Not found", { status: 404 });
     }
-    const key = url.searchParams.get("key") ?? "";
+    const auth = request.headers.get("Authorization") ?? "";
+    const key = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : "";
     if (!env.RUN_SECRET || !(await keyMatches(key, env.RUN_SECRET))) {
       return new Response("Forbidden", { status: 403 });
     }
