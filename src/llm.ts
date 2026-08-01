@@ -1,40 +1,27 @@
 import { createGateway } from "@ai-sdk/gateway";
-import { generateText, jsonSchema, Output } from "ai";
+import { generateText, Output } from "ai";
+import { z } from "zod";
 import { buildLlmPayload } from "./sanitize";
 import type { AppState, LlmResult, WeekActivity } from "./types";
 
-const SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  required: ["projectSummaries", "hoursEstimate", "salary", "praise", "telegramMessage"],
-  properties: {
-    projectSummaries: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["repo", "summary"],
-        properties: {
-          repo: { type: "string" },
-          summary: { type: "string" },
-        },
-      },
-    },
-    hoursEstimate: { type: "number" },
-    salary: {
-      type: "object",
-      additionalProperties: false,
-      required: ["employeeWeekEur", "freelanceWeekEur", "rationale"],
-      properties: {
-        employeeWeekEur: { type: "number" },
-        freelanceWeekEur: { type: "number" },
-        rationale: { type: "string" },
-      },
-    },
-    praise: { type: "string" },
-    telegramMessage: { type: "string" },
-  },
-} as const;
+// Единая схема: используется и для реальной рантайм-валидации (Vercel/generateText),
+// и как источник JSON Schema для OpenAI Responses API.
+const RESULT_SCHEMA = z.strictObject({
+  projectSummaries: z.array(z.strictObject({ repo: z.string(), summary: z.string() })),
+  hoursEstimate: z.number(),
+  salary: z.strictObject({
+    employeeWeekEur: z.number(),
+    freelanceWeekEur: z.number(),
+    rationale: z.string(),
+  }),
+  praise: z.string(),
+  telegramMessage: z.string(),
+}) satisfies z.ZodType<LlmResult>;
+
+function jsonSchemaForOpenAI() {
+  const { $schema, ...schema } = z.toJSONSchema(RESULT_SCHEMA);
+  return schema;
+}
 
 function systemPrompt(env: Env): string {
   return `Ты — опытный tech lead и тёплый, но честный карьерный коуч. Твоя задача — помочь разработчику увидеть и оценить реальные результаты его недели. Он склонен обесценивать свою работу, поэтому подчёркивай достижения, но только по фактам — без пустой лести и сиропа.
@@ -69,7 +56,7 @@ async function callOpenAI(env: Env, instructions: string, input: unknown): Promi
           type: "json_schema",
           name: "weekly_insights",
           strict: true,
-          schema: SCHEMA,
+          schema: jsonSchemaForOpenAI(),
         },
       },
     }),
@@ -86,7 +73,7 @@ async function callOpenAI(env: Env, instructions: string, input: unknown): Promi
   if (!text) {
     throw new Error(`OpenAI: no output_text in response: ${JSON.stringify(data).slice(0, 500)}`);
   }
-  return JSON.parse(text) as LlmResult;
+  return RESULT_SCHEMA.parse(JSON.parse(text));
 }
 
 // Vercel AI Gateway: единая точка оплаты и роутинга к тем же моделям OpenAI,
@@ -98,7 +85,7 @@ async function callVercel(env: Env, instructions: string, input: unknown): Promi
     instructions,
     prompt: `Данные активности за неделю (JSON):\n${JSON.stringify(input)}`,
     reasoning: env.LLM_REASONING_EFFORT,
-    output: Output.object({ schema: jsonSchema<LlmResult>(SCHEMA) }),
+    output: Output.object({ schema: RESULT_SCHEMA }),
   });
   return output;
 }
