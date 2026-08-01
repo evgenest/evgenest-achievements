@@ -33,7 +33,7 @@
   ],
   "vars": {
     "GITHUB_USER": "evgenest",
-    "REPORTS_REPO": "evgenest/evgenest-achievements",
+    "REPORTS_REPO": "your-github-login/your-reports-repo",
     "REPORT_LANG": "ru",
     "DEV_PROFILE": "Fullstack TypeScript/JavaScript developer based in Leipzig, Germany. Works with Cloudflare Workers, Node.js/Bun, React/Next.js, Telegram bots, AI/LLM integrations.",
     // "openai" — напрямую в OpenAI; "vercel" — через Vercel AI Gateway (тот же провайдер моделей, единый биллинг)

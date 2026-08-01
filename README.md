@@ -42,7 +42,8 @@ Vars в `wrangler.jsonc`: `GITHUB_USER`, `REPORTS_REPO` (`<owner>/<repo>` для
 
 | Секрет | Что это |
 |---|---|
-| `GITHUB_TOKEN` | Fine-grained PAT: чтение всех репо + contents read/write для репо с отчётами |
+| `GITHUB_TOKEN` | Fine-grained PAT: read-only доступ ко всем репо (сбор активности) |
+| `GITHUB_REPORTS_TOKEN` | Fine-grained PAT: только репо с отчётами, только Contents read/write (коммит отчёта) |
 | `OPENAI_API_KEY` | Ключ OpenAI API — нужен только при `LLM_PROVIDER=openai` |
 | `VERCEL_AI_GATEWAY_API_KEY` | Ключ Vercel AI Gateway — нужен только при `LLM_PROVIDER=vercel` |
 | `TELEGRAM_BOT_TOKEN` | Токен бота от @BotFather |

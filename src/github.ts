@@ -206,12 +206,12 @@ export async function collectWeekActivity(env: Env, since: Date, until: Date): P
 /** Коммит markdown-отчёта в репозиторий через Contents API. Возвращает html_url файла. */
 export async function commitFile(env: Env, path: string, content: string, message: string): Promise<string> {
   const url = `${API}/repos/${env.REPORTS_REPO}/contents/${path}`;
-  const existing = await fetch(url, { headers: headers(env.GITHUB_TOKEN) });
+  const existing = await fetch(url, { headers: headers(env.GITHUB_REPORTS_TOKEN) });
   const sha = existing.ok ? ((await existing.json()) as { sha: string }).sha : undefined;
 
   const res = await fetch(url, {
     method: "PUT",
-    headers: { ...headers(env.GITHUB_TOKEN), "Content-Type": "application/json" },
+    headers: { ...headers(env.GITHUB_REPORTS_TOKEN), "Content-Type": "application/json" },
     body: JSON.stringify({
       message,
       content: btoa(String.fromCharCode(...new TextEncoder().encode(content))),
