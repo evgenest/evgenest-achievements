@@ -12,6 +12,14 @@ async function send(env: Env, text: string, parseMode?: "HTML"): Promise<Respons
   });
 }
 
+/** Короткое sanitized-уведомление о падении фонового рана — без текста ошибки, детали только в логах Workers. */
+export async function notifyTelegramError(env: Env): Promise<void> {
+  const res = await send(env, "⚠️ Еженедельный отчёт не сформирован — ошибка при обработке. Подробности в логах Workers.");
+  if (!res.ok) {
+    throw new Error(`Telegram sendMessage (error alert) -> ${res.status}: ${await res.text()}`);
+  }
+}
+
 export async function notifyTelegram(
   env: Env,
   llmMessage: string,
