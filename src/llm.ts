@@ -18,9 +18,51 @@ const RESULT_SCHEMA = z.strictObject({
   telegramMessage: z.string(),
 }) satisfies z.ZodType<LlmResult>;
 
+function safeJsonParse(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+// Для диагностики схемных мисматчей достаточно ФОРМЫ ответа (какие ключи, какого типа,
+// какой длины), без самого контента — раскрытие бизнес-контекста в логах не нужно.
+function describeStructure(value: unknown): unknown {
+  if (value === null) return "null";
+  if (Array.isArray(value)) {
+    return { array: value.length, item: value.length > 0 ? describeStructure(value[0]) : undefined };
+  }
+  if (typeof value === "object") {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, describeStructure(v)]));
+  }
+  if (typeof value === "string") return `string(${value.length})`;
+  return typeof value;
+}
+
+// Если распарсить не удалось — не JSON вовсе, структуру не построить, в этом случае
+// логируем обрезанный текст (только тут контент реально нужен для диагностики).
+function describeLlmOutput(rawText: string, parsed: unknown): unknown {
+  return parsed !== undefined ? { kind: "json", structure: describeStructure(parsed) } : { kind: "non-json", preview: rawText.slice(0, 300) };
+}
+
 function jsonSchemaForOpenAI() {
   const { $schema, ...schema } = z.toJSONSchema(RESULT_SCHEMA);
   return schema;
+}
+
+// Некоторые модели (особенно вне строгого structured output, напр. через Vercel Gateway)
+// иногда отдают projectSummaries как объект { repoName: summary } вместо массива —
+// приводим к ожидаемой форме перед валидацией, не ослабляя саму схему.
+function normalizeProjectSummaries(raw: unknown): unknown {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const obj = raw as Record<string, unknown>;
+  const ps = obj.projectSummaries;
+  if (ps === null || typeof ps !== "object" || Array.isArray(ps)) return raw;
+  return {
+    ...obj,
+    projectSummaries: Object.entries(ps as Record<string, unknown>).map(([repo, summary]) => ({ repo, summary })),
+  };
 }
 
 function systemPrompt(env: Env): string {
@@ -31,7 +73,7 @@ function systemPrompt(env: Env): string {
 Отвечай на языке: ${env.REPORT_LANG === "ru" ? "русский" : "английский"}.
 
 Правила:
-- projectSummaries: для каждого репозитория из данных — 2-5 предложений человеческим языком о том, что было сделано ПО СУТИ (бизнес-логика, ценность), а не пересказ сообщений коммитов. Ключ repo — полное имя репозитория как в данных.
+- projectSummaries: МАССИВ объектов вида {"repo": "...", "summary": "..."} — по одному объекту на каждый репозиторий из данных. НЕ объект/словарь с именами репозиториев в качестве ключей. Поле repo — полное имя репозитория как в данных. Поле summary — 2-5 предложений человеческим языком о том, что было сделано ПО СУТИ (бизнес-логика, ценность), а не пересказ сообщений коммитов.
 - hoursEstimate: реалистичная оценка чистых часов работы за неделю по объёму и сложности изменений.
 - salary: сколько такая неделя стоила бы на рынке. employeeWeekEur — недельная доля брутто-зарплаты офисного разработчика такого профиля (город из профиля), пропорционально оценённым часам. freelanceWeekEur — те же часы по рыночной фриланс-ставке. rationale — 1-2 предложения с использованными ставками.
 - praise: 3-6 предложений — «слово тренера»: что впечатляет в этой неделе, какой прогресс виден, что это говорит о разработчике. Конкретика, не общие слова.
@@ -73,12 +115,20 @@ async function callOpenAI(env: Env, instructions: string, input: unknown): Promi
   if (!text) {
     throw new Error(`OpenAI: no output_text in response: ${JSON.stringify(data).slice(0, 500)}`);
   }
-  try {
-    return RESULT_SCHEMA.parse(JSON.parse(text));
-  } catch (err) {
-    console.error(JSON.stringify({ event: "llm_schema_mismatch", provider: "openai", model: env.LLM_MODEL, text, error: String(err) }));
-    throw err;
-  }
+  const parsed = safeJsonParse(text);
+  const result = parsed !== undefined ? RESULT_SCHEMA.safeParse(normalizeProjectSummaries(parsed)) : undefined;
+  if (result?.success) return result.data;
+
+  console.error(
+    JSON.stringify({
+      event: "llm_schema_mismatch",
+      provider: "openai",
+      model: env.LLM_MODEL,
+      output: describeLlmOutput(text, parsed),
+      error: result ? String(result.error) : "invalid JSON",
+    }),
+  );
+  throw new Error(`OpenAI: response did not match schema (${result ? "validation failed" : "invalid JSON"})`);
 }
 
 // Vercel AI Gateway: единая точка оплаты и роутинга к тем же моделям OpenAI,
@@ -95,13 +145,17 @@ async function callVercel(env: Env, instructions: string, input: unknown): Promi
     });
     return output;
   } catch (err) {
-    if (NoObjectGeneratedError.isInstance(err)) {
+    if (NoObjectGeneratedError.isInstance(err) && err.text) {
+      const parsed = safeJsonParse(err.text);
+      const recovered = parsed !== undefined ? RESULT_SCHEMA.safeParse(normalizeProjectSummaries(parsed)) : undefined;
+      if (recovered?.success) return recovered.data;
+
       console.error(
         JSON.stringify({
           event: "llm_schema_mismatch",
           provider: "vercel",
           model: env.LLM_MODEL,
-          text: err.text,
+          output: describeLlmOutput(err.text, parsed),
           cause: String(err.cause),
           finishReason: err.finishReason,
         }),
