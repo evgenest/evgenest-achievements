@@ -68,6 +68,7 @@ export interface AppState {
   allTime: StateTotals;
   unlocked: string[];
   lastWeek: WeekSnapshot | null;
+  lastRunUntil: string | null; // ISO — конец периода последнего успешного рана
 }
 
 export interface LlmResult {

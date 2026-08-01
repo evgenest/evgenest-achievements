@@ -9,6 +9,7 @@ const EMPTY_STATE: AppState = {
   allTime: { commits: 0, prs: 0, issues: 0, additions: 0, deletions: 0, activeWeeks: 0 },
   unlocked: [],
   lastWeek: null,
+  lastRunUntil: null,
 };
 
 export async function loadState(env: Env): Promise<AppState> {
@@ -44,6 +45,7 @@ export function advanceState(state: AppState, week: WeekActivity, newlyUnlocked:
       additions: week.totalAdditions,
       deletions: week.totalDeletions,
     },
+    lastRunUntil: week.until,
   };
 }
 

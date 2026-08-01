@@ -16,12 +16,20 @@ export interface RunResult {
 }
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+const MAX_LOOKBACK_MS = 4 * WEEK_MS;
 
 export async function runWeekly(env: Env, until: Date): Promise<RunResult> {
-  const since = new Date(until.getTime() - WEEK_MS);
+  const state = await loadState(env);
+
+  // Догоняем пропуски (упавший cron, невалидный ответ LLM) от даты последнего успешного
+  // рана, но не более чем на 4 недели назад — иначе можно упереться в лимиты GitHub API.
+  const earliestSince = new Date(until.getTime() - MAX_LOOKBACK_MS);
+  const lastRunUntil = state.lastRunUntil ? new Date(state.lastRunUntil) : null;
+  const since = lastRunUntil
+    ? new Date(Math.max(lastRunUntil.getTime(), earliestSince.getTime()))
+    : new Date(until.getTime() - WEEK_MS);
 
   const week = await collectWeekActivity(env, since, until);
-  const state = await loadState(env);
   const newStreak = isActiveWeek(week) ? state.streak + 1 : 0;
   const achievements = detectAchievements(week, state, newStreak);
   const llm = await generateInsights(env, week, state, newStreak);
