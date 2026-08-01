@@ -1,5 +1,5 @@
 import { createGateway } from "@ai-sdk/gateway";
-import { generateText, Output } from "ai";
+import { generateText, NoObjectGeneratedError, Output } from "ai";
 import { z } from "zod";
 import { buildLlmPayload } from "./sanitize";
 import type { AppState, LlmResult, WeekActivity } from "./types";
@@ -73,21 +73,42 @@ async function callOpenAI(env: Env, instructions: string, input: unknown): Promi
   if (!text) {
     throw new Error(`OpenAI: no output_text in response: ${JSON.stringify(data).slice(0, 500)}`);
   }
-  return RESULT_SCHEMA.parse(JSON.parse(text));
+  try {
+    return RESULT_SCHEMA.parse(JSON.parse(text));
+  } catch (err) {
+    console.error(JSON.stringify({ event: "llm_schema_mismatch", provider: "openai", model: env.LLM_MODEL, text, error: String(err) }));
+    throw err;
+  }
 }
 
 // Vercel AI Gateway: единая точка оплаты и роутинга к тем же моделям OpenAI,
 // когда напрямую платить OpenAI неудобно.
 async function callVercel(env: Env, instructions: string, input: unknown): Promise<LlmResult> {
   const gateway = createGateway({ apiKey: env.VERCEL_AI_GATEWAY_API_KEY });
-  const { output } = await generateText({
-    model: gateway(env.LLM_MODEL),
-    instructions,
-    prompt: `Данные активности за неделю (JSON):\n${JSON.stringify(input)}`,
-    reasoning: env.LLM_REASONING_EFFORT,
-    output: Output.object({ schema: RESULT_SCHEMA }),
-  });
-  return output;
+  try {
+    const { output } = await generateText({
+      model: gateway(env.LLM_MODEL),
+      instructions,
+      prompt: `Данные активности за неделю (JSON):\n${JSON.stringify(input)}`,
+      reasoning: env.LLM_REASONING_EFFORT,
+      output: Output.object({ schema: RESULT_SCHEMA }),
+    });
+    return output;
+  } catch (err) {
+    if (NoObjectGeneratedError.isInstance(err)) {
+      console.error(
+        JSON.stringify({
+          event: "llm_schema_mismatch",
+          provider: "vercel",
+          model: env.LLM_MODEL,
+          text: err.text,
+          cause: String(err.cause),
+          finishReason: err.finishReason,
+        }),
+      );
+    }
+    throw err;
+  }
 }
 
 export async function generateInsights(env: Env, week: WeekActivity, state: AppState, newStreak: number): Promise<LlmResult> {
