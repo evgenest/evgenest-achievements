@@ -66,7 +66,8 @@ Reports contain whatever the policy allows through, so keep the reports reposito
 
 ## Configuration
 
-Vars live in `wrangler.jsonc`. Everything except the two identifiers has a working default.
+Vars live in `wrangler.jsonc`, which is committed as a **template**: placeholder identifiers
+and conservative defaults. Everything except the two identifiers has a working default.
 
 | Var | Default | Meaning |
 |---|---|---|
@@ -81,7 +82,7 @@ Vars live in `wrangler.jsonc`. Everything except the two identifiers has a worki
 | `ENABLE_SALARY_ESTIMATE` | `false` | Ask the model what the week would be worth on the market |
 | `MAX_REPOS` | `15` | Upper bound on repositories inspected per run |
 | `LLM_PROVIDER` | `openai` | `openai` (direct) or `vercel` (AI Gateway) |
-| `LLM_MODEL` | — | `provider/model` for the Gateway, a bare model name for OpenAI |
+| `LLM_MODEL` | `gpt-5.6-luna` | `provider/model` for the Gateway, a bare model name for OpenAI |
 | `LLM_REASONING_EFFORT` | `medium` | `none`/`minimal`/`low`/`medium`/`high`/`xhigh`/`provider-default`; a model may collapse these to on/off |
 
 Secrets (`wrangler secret put <NAME>`, or `.dev.vars` locally — see `.dev.vars.example`):
@@ -97,17 +98,44 @@ Secrets (`wrangler secret put <NAME>`, or `.dev.vars` locally — see `.dev.vars
 | `RUN_SECRET` | Any string; the bearer token for manual runs |
 | `DEV_PROFILE` | Free-form developer profile for the prompt (stack, seniority, region). A secret rather than a var: it is personal data and it drives the salary estimate |
 
-`account_id` is deliberately absent from `wrangler.jsonc`. Export `CLOUDFLARE_ACCOUNT_ID` locally and add it as a repository secret if your API token can reach more than one account. The KV namespace id in the config is the author's — create your own with `wrangler kv namespace create STATE` and replace it.
+### Your own deployment
+
+The committed `wrangler.jsonc` will not deploy as-is: the worker name is generic and the KV
+namespace id is a placeholder. Two ways to make it yours:
+
+- **Private fork** — edit `wrangler.jsonc` in place and use `bun run deploy`.
+- **Public fork** — copy it to `wrangler.prod.jsonc` (gitignored), put your real worker name,
+  KV namespace id and vars there, and deploy with `bun run deploy:prod`. Your identifiers then
+  stay out of the repository, and the template keeps working for everyone else.
+
+`account_id` is deliberately absent from both. Export `CLOUDFLARE_ACCOUNT_ID` locally and add
+it as a repository secret if your API token can reach more than one account.
+
+`.github/workflows/deploy.yml` deploys on every push to `main`, using the second layout: it
+skips itself on forks and whenever the secrets are missing, and otherwise restores
+`wrangler.prod.jsonc` from a repository secret before deploying.
+
+| Repository secret | Value |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` | API token with Workers deploy permissions |
+| `CLOUDFLARE_ACCOUNT_ID` | Only if the token can reach several accounts |
+| `WRANGLER_CONFIG_B64` | `base64 -w0 wrangler.prod.jsonc` |
 
 ## Running it
 
 ```bash
 bun install
+cp .dev.vars.example .dev.vars   # fill in for local runs
 bun run types     # generates worker-configuration.d.ts from wrangler.jsonc + .dev.vars
 bun run check     # tsc --noEmit
 bun run test      # vitest
-bun run deploy
+bun run deploy    # or deploy:prod, see above
 ```
+
+`worker-configuration.d.ts` is generated, not committed — run `bun run types` after
+`bun install` and after every change to `wrangler.jsonc` or `.dev.vars`. Only the *keys* of
+`.dev.vars` matter for typing, so `.dev.vars.example` is enough to typecheck (that is what CI
+copies).
 
 Manual run: `curl -H "Authorization: Bearer <RUN_SECRET>" https://<worker-url>/run`, optionally with `?date=YYYY-MM-DD` for the week ending on that date (interpreted at 09:00 local time in `TIMEZONE`). The endpoint answers `202` immediately and finishes the run in the background.
 
@@ -117,6 +145,11 @@ Manual run: `curl -H "Authorization: Bearer <RUN_SECRET>" https://<worker-url>/r
 - Only default-branch commits authored by `GITHUB_USER` are counted, up to 100 per repository per run.
 - CI and deployment stats are fetched for at most 10 repositories per run (Workers subrequest budget).
 - Missed runs are caught up from the last successful one, but never more than 4 weeks back.
+
+## Security
+
+What the worker is trusted with, what deliberately never reaches the model, and how to report
+a problem privately: [SECURITY.md](SECURITY.md).
 
 ## License
 

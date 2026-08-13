@@ -1,6 +1,9 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "evgenest-achievements",
+  // This file is the template every fork starts from. Copy it to `wrangler.prod.jsonc`
+  // (gitignored) with your own values and deploy with `-c wrangler.prod.jsonc`, or just
+  // edit this file in place if your fork is private.
+  "name": "github-weekly-digest",
   "main": "src/index.ts",
   // account_id is intentionally NOT committed. Set CLOUDFLARE_ACCOUNT_ID in the
   // environment (locally and as a CI secret) when your API token can reach more
@@ -29,39 +32,40 @@
   },
   "kv_namespaces": [
     {
-      // Replace with your own namespace: `wrangler kv namespace create STATE`
       "binding": "STATE",
-      "id": "REDACTED_KV_NAMESPACE_ID"
+      // Placeholder. Create your own namespace and paste its id here:
+      // `wrangler kv namespace create STATE`
+      "id": "0000000000000000000000000000000000000000000000000000000000000000"
     }
   ],
   "vars": {
     // GitHub account whose activity is summarized
-    "GITHUB_USER": "evgenest",
+    "GITHUB_USER": "your-github-login",
     // "<owner>/<repo>" the markdown reports are committed to. Keep it private if
     // PRIVATE_REPOS is "full" — reports then contain private repo names and commit titles.
     "REPORTS_REPO": "your-github-login/your-reports-repo",
     "REPORTS_DIR": "reports",
     // Report language: "en" or "ru" (drives report copy, achievements and the LLM prompt)
-    "REPORT_LANG": "ru",
-    "REPORT_TITLE": "EVGENEST Achievements",
+    "REPORT_LANG": "en",
+    "REPORT_TITLE": "Weekly Achievements",
     // IANA time zone used for dates in the report and for time-based achievements
-    "TIMEZONE": "Europe/Berlin",
+    "TIMEZONE": "UTC",
     // ISO 4217 code used to render the salary estimate
     "CURRENCY": "EUR",
     // "full" — private repos appear as-is; "redact" — counted, but names, commit
     // messages, titles and links are stripped; "skip" — excluded entirely.
-    "PRIVATE_REPOS": "full",
+    "PRIVATE_REPOS": "redact",
     // Ask the model what the week would be worth on the market. Requires DEV_PROFILE.
-    "ENABLE_SALARY_ESTIMATE": "true",
+    "ENABLE_SALARY_ESTIMATE": "false",
     // Upper bound on repositories inspected per run (GitHub API / subrequest budget)
     "MAX_REPOS": "15",
     // "openai" — OpenAI directly; "vercel" — through the Vercel AI Gateway
-    "LLM_PROVIDER": "vercel",
+    "LLM_PROVIDER": "openai",
     // Format depends on LLM_PROVIDER: "vercel" (Gateway) needs "provider/model",
     // "openai" (direct API) takes the bare model name.
-    "LLM_MODEL": "nvidia/nemotron-3-ultra-550b-a55b",
+    "LLM_MODEL": "gpt-5.6-luna",
     // The Gateway exposes reasoning levels ("low"/"medium"/"high"/...), but a given model
     // may only support an on/off toggle — the SDK then maps the value to the nearest level.
-    "LLM_REASONING_EFFORT": "high"
+    "LLM_REASONING_EFFORT": "medium"
   }
 }

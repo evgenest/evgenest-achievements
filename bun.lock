@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "evgenest-achievements",
+      "name": "github-weekly-digest",
       "dependencies": {
         "@ai-sdk/gateway": "^4.0.33",
         "ai": "^7.0.44",

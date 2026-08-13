@@ -14,8 +14,14 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     name: Deploy
+    # Forks have no deployment secrets — skip instead of failing on every push.
+    if: ${{ !github.event.repository.fork }}
     permissions:
       contents: read
+    env:
+      # wrangler.jsonc in the repo is a template with placeholder ids. The real config
+      # (worker name, KV namespace id, vars) lives in a base64-encoded repository secret.
+      HAS_DEPLOY_SECRETS: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.WRANGLER_CONFIG_B64 != '' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -26,17 +32,38 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Generate worker types
+        run: |
+          cp -n .dev.vars.example .dev.vars
+          bun run types
+
       - name: Typecheck
         run: bun run check
 
       - name: Test
         run: bun run test
 
+      - name: Restore production wrangler config
+        if: env.HAS_DEPLOY_SECRETS == 'true'
+        # The .dev.vars written above holds empty placeholders and exists only for typing.
+        # Deploy never reads it, but it has no business being around during one either.
+        run: |
+          rm -f .dev.vars
+          printf '%s' "$WRANGLER_CONFIG_B64" | base64 -d > wrangler.prod.jsonc
+        env:
+          WRANGLER_CONFIG_B64: ${{ secrets.WRANGLER_CONFIG_B64 }}
+
       - name: Deploy
+        if: env.HAS_DEPLOY_SECRETS == 'true'
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           packageManager: bun
+          command: deploy -c wrangler.prod.jsonc
         env:
           # Not committed to wrangler.jsonc; required when the token can see several accounts
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Skipped
+        if: env.HAS_DEPLOY_SECRETS != 'true'
+        run: echo "CLOUDFLARE_API_TOKEN / WRANGLER_CONFIG_B64 not set — deployment skipped."

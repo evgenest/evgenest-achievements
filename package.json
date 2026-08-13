@@ -1,5 +1,5 @@
 {
-  "name": "evgenest-achievements",
+  "name": "github-weekly-digest",
   "version": "1.0.0",
   "private": true,
   "license": "MIT",
@@ -13,6 +13,8 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "types": "wrangler types",
+    "dev:prod": "wrangler dev -c wrangler.prod.jsonc",
+    "deploy:prod": "wrangler deploy -c wrangler.prod.jsonc",
     "check": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
