@@ -1,22 +1,33 @@
 import { createGateway } from "@ai-sdk/gateway";
 import { generateText, NoObjectGeneratedError, Output } from "ai";
 import { z } from "zod";
+import type { Config } from "./config";
 import { buildLlmPayload } from "./sanitize";
 import type { AppState, LlmResult, WeekActivity } from "./types";
 
-// Единая схема: используется и для реальной рантайм-валидации (Vercel/generateText),
-// и как источник JSON Schema для OpenAI Responses API.
-const RESULT_SCHEMA = z.strictObject({
+// One schema serves both the runtime validation (Vercel/generateText) and the
+// JSON Schema handed to the OpenAI Responses API.
+const SALARY_SCHEMA = z.strictObject({
+  employeeWeek: z.number(),
+  freelanceWeek: z.number(),
+  rationale: z.string(),
+});
+
+const BASE_SHAPE = {
   projectSummaries: z.array(z.strictObject({ repo: z.string(), summary: z.string() })),
   hoursEstimate: z.number(),
-  salary: z.strictObject({
-    employeeWeekEur: z.number(),
-    freelanceWeekEur: z.number(),
-    rationale: z.string(),
-  }),
   praise: z.string(),
   telegramMessage: z.string(),
-}) satisfies z.ZodType<LlmResult>;
+};
+
+type ResultSchema = z.ZodType<LlmResult>;
+
+/** The salary block is only requested (and only accepted) when the estimate is enabled. */
+function resultSchema(salaryEstimate: boolean): ResultSchema {
+  return (
+    salaryEstimate ? z.strictObject({ ...BASE_SHAPE, salary: SALARY_SCHEMA }) : z.strictObject(BASE_SHAPE)
+  ) as ResultSchema;
+}
 
 function safeJsonParse(text: string): unknown {
   try {
@@ -26,8 +37,8 @@ function safeJsonParse(text: string): unknown {
   }
 }
 
-// Для диагностики схемных мисматчей достаточно ФОРМЫ ответа (какие ключи, какого типа,
-// какой длины), без самого контента — раскрытие бизнес-контекста в логах не нужно.
+// For diagnosing schema mismatches the SHAPE of the answer is enough (which keys,
+// of what type, of what length) — the content itself never needs to reach the logs.
 function describeStructure(value: unknown): unknown {
   if (value === null) return "null";
   if (Array.isArray(value)) {
@@ -40,21 +51,21 @@ function describeStructure(value: unknown): unknown {
   return typeof value;
 }
 
-// Если распарсить не удалось — не JSON вовсе, структуру не построить, в этом случае
-// логируем обрезанный текст (только тут контент реально нужен для диагностики).
+// If parsing failed the answer is not JSON at all and there is no structure to log;
+// only then does the (truncated) raw text get logged, because nothing else helps.
 function describeLlmOutput(rawText: string, parsed: unknown): unknown {
   return parsed !== undefined ? { kind: "json", structure: describeStructure(parsed) } : { kind: "non-json", preview: rawText.slice(0, 300) };
 }
 
-function jsonSchemaForOpenAI() {
-  const { $schema, ...schema } = z.toJSONSchema(RESULT_SCHEMA);
-  return schema;
+function jsonSchemaForOpenAI(schema: ResultSchema) {
+  const { $schema, ...rest } = z.toJSONSchema(schema);
+  return rest;
 }
 
-// Некоторые модели (особенно вне строгого structured output, напр. через Vercel Gateway)
-// иногда отдают projectSummaries как объект { repoName: summary } вместо массива —
-// приводим к ожидаемой форме перед валидацией, не ослабляя саму схему.
-function normalizeProjectSummaries(raw: unknown): unknown {
+// Some models (especially outside strict structured output, e.g. through the Vercel
+// Gateway) return projectSummaries as an object { repoName: summary } instead of an
+// array — reshape it before validation rather than loosening the schema.
+export function normalizeProjectSummaries(raw: unknown): unknown {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return raw;
   const obj = raw as Record<string, unknown>;
   const ps = obj.projectSummaries;
@@ -65,23 +76,16 @@ function normalizeProjectSummaries(raw: unknown): unknown {
   };
 }
 
-function systemPrompt(env: Env): string {
-  return `Ты — опытный tech lead и тёплый, но честный карьерный коуч. Твоя задача — помочь разработчику увидеть и оценить реальные результаты его недели. Он склонен обесценивать свою работу, поэтому подчёркивай достижения, но только по фактам — без пустой лести и сиропа.
-
-Профиль разработчика: ${env.DEV_PROFILE}
-
-Отвечай на языке: ${env.REPORT_LANG === "ru" ? "русский" : "английский"}.
-
-Правила:
-- projectSummaries: МАССИВ объектов вида {"repo": "...", "summary": "..."} — по одному объекту на каждый репозиторий из данных. НЕ объект/словарь с именами репозиториев в качестве ключей. Поле repo — полное имя репозитория как в данных. Поле summary — 2-5 предложений человеческим языком о том, что было сделано ПО СУТИ (бизнес-логика, ценность), а не пересказ сообщений коммитов.
-- hoursEstimate: реалистичная оценка чистых часов работы за неделю по объёму и сложности изменений.
-- salary: сколько такая неделя стоила бы на рынке. employeeWeekEur — недельная доля брутто-зарплаты офисного разработчика такого профиля (город из профиля), пропорционально оценённым часам. freelanceWeekEur — те же часы по рыночной фриланс-ставке. rationale — 1-2 предложения с использованными ставками.
-- praise: 3-6 предложений — «слово тренера»: что впечатляет в этой неделе, какой прогресс виден, что это говорит о разработчике. Конкретика, не общие слова.
-- telegramMessage: короткое сообщение 2-4 предложения для Telegram: приветствие, 1-2 самые яркие цифры или факта недели, ободрение. Разметка только <b> и <i> (HTML Telegram). Без ссылок — ссылку на отчёт добавит код.
-- Если неделя пустая или почти пустая: бережный тон, отдых и пауза — нормальная часть работы, без стыда и упрёков.`;
+function systemPrompt(config: Config): string {
+  return config.messages.prompt({
+    devProfile: config.devProfile,
+    languageName: config.messages.languageName,
+    currency: config.currency,
+    salaryEstimate: config.salaryEstimate,
+  });
 }
 
-async function callOpenAI(env: Env, instructions: string, input: unknown): Promise<LlmResult> {
+async function callOpenAI(env: Env, config: Config, schema: ResultSchema, instructions: string, input: unknown): Promise<LlmResult> {
   const res = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
@@ -89,16 +93,16 @@ async function callOpenAI(env: Env, instructions: string, input: unknown): Promi
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: env.LLM_MODEL,
-      reasoning: { effort: env.LLM_REASONING_EFFORT },
+      model: config.llm.model,
+      reasoning: { effort: config.llm.reasoningEffort },
       instructions,
-      input: `Данные активности за неделю (JSON):\n${JSON.stringify(input)}`,
+      input: `Weekly activity data (JSON):\n${JSON.stringify(input)}`,
       text: {
         format: {
           type: "json_schema",
           name: "weekly_insights",
           strict: true,
-          schema: jsonSchemaForOpenAI(),
+          schema: jsonSchemaForOpenAI(schema),
         },
       },
     }),
@@ -116,14 +120,14 @@ async function callOpenAI(env: Env, instructions: string, input: unknown): Promi
     throw new Error(`OpenAI: no output_text in response: ${JSON.stringify(data).slice(0, 500)}`);
   }
   const parsed = safeJsonParse(text);
-  const result = parsed !== undefined ? RESULT_SCHEMA.safeParse(normalizeProjectSummaries(parsed)) : undefined;
+  const result = parsed !== undefined ? schema.safeParse(normalizeProjectSummaries(parsed)) : undefined;
   if (result?.success) return result.data;
 
   console.error(
     JSON.stringify({
       event: "llm_schema_mismatch",
       provider: "openai",
-      model: env.LLM_MODEL,
+      model: config.llm.model,
       output: describeLlmOutput(text, parsed),
       error: result ? String(result.error) : "invalid JSON",
     }),
@@ -131,30 +135,30 @@ async function callOpenAI(env: Env, instructions: string, input: unknown): Promi
   throw new Error(`OpenAI: response did not match schema (${result ? "validation failed" : "invalid JSON"})`);
 }
 
-// Vercel AI Gateway: единая точка оплаты и роутинга к тем же моделям OpenAI,
-// когда напрямую платить OpenAI неудобно.
-async function callVercel(env: Env, instructions: string, input: unknown): Promise<LlmResult> {
+// Vercel AI Gateway: a single billing and routing point to the same models,
+// for when paying the provider directly is inconvenient.
+async function callVercel(env: Env, config: Config, schema: ResultSchema, instructions: string, input: unknown): Promise<LlmResult> {
   const gateway = createGateway({ apiKey: env.VERCEL_AI_GATEWAY_API_KEY });
   try {
     const { output } = await generateText({
-      model: gateway(env.LLM_MODEL),
+      model: gateway(config.llm.model),
       instructions,
-      prompt: `Данные активности за неделю (JSON):\n${JSON.stringify(input)}`,
-      reasoning: env.LLM_REASONING_EFFORT,
-      output: Output.object({ schema: RESULT_SCHEMA }),
+      prompt: `Weekly activity data (JSON):\n${JSON.stringify(input)}`,
+      reasoning: config.llm.reasoningEffort,
+      output: Output.object({ schema }),
     });
     return output;
   } catch (err) {
     if (NoObjectGeneratedError.isInstance(err) && err.text) {
       const parsed = safeJsonParse(err.text);
-      const recovered = parsed !== undefined ? RESULT_SCHEMA.safeParse(normalizeProjectSummaries(parsed)) : undefined;
+      const recovered = parsed !== undefined ? schema.safeParse(normalizeProjectSummaries(parsed)) : undefined;
       if (recovered?.success) return recovered.data;
 
       console.error(
         JSON.stringify({
           event: "llm_schema_mismatch",
           provider: "vercel",
-          model: env.LLM_MODEL,
+          model: config.llm.model,
           output: describeLlmOutput(err.text, parsed),
           cause: String(err.cause),
           finishReason: err.finishReason,
@@ -165,10 +169,19 @@ async function callVercel(env: Env, instructions: string, input: unknown): Promi
   }
 }
 
-export async function generateInsights(env: Env, week: WeekActivity, state: AppState, newStreak: number): Promise<LlmResult> {
-  // Через границу в LLM данные проходят ТОЛЬКО через страж (см. sanitize.ts)
+export async function generateInsights(
+  env: Env,
+  config: Config,
+  week: WeekActivity,
+  state: AppState,
+  newStreak: number,
+): Promise<LlmResult> {
+  // The only path across the boundary into an LLM goes through the guard (see sanitize.ts)
   const input = buildLlmPayload(week, state, newStreak);
-  const instructions = systemPrompt(env);
+  const instructions = systemPrompt(config);
+  const schema = resultSchema(config.salaryEstimate);
 
-  return env.LLM_PROVIDER === "vercel" ? callVercel(env, instructions, input) : callOpenAI(env, instructions, input);
+  return config.llm.provider === "vercel"
+    ? callVercel(env, config, schema, instructions, input)
+    : callOpenAI(env, config, schema, instructions, input);
 }

@@ -29,8 +29,14 @@ jobs:
       - name: Typecheck
         run: bun run check
 
+      - name: Test
+        run: bun run test
+
       - name: Deploy
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           packageManager: bun
+        env:
+          # Not committed to wrangler.jsonc; required when the token can see several accounts
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

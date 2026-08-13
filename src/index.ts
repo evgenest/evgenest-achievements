@@ -1,5 +1,7 @@
+import { loadConfig } from "./config";
 import { runWeekly } from "./run";
 import { notifyTelegramError } from "./telegram";
+import { zonedTimeToUtc } from "./time";
 
 async function keyMatches(provided: string, secret: string): Promise<boolean> {
   const enc = new TextEncoder();
@@ -10,9 +12,9 @@ async function keyMatches(provided: string, secret: string): Promise<boolean> {
   return crypto.subtle.timingSafeEqual(a, b);
 }
 
-// Полная ошибка — только в логи Workers (приватно, требует доступа к аккаунту Cloudflare).
-// В Telegram уходит короткое sanitized-уведомление без текста ошибки: результат недели
-// в любом случае доезжает через бота — либо готовый отчёт, либо факт падения.
+// The full error goes to the Workers logs only (private, requires Cloudflare account access).
+// Telegram gets a short sanitized notice without the error text: either way the week's
+// outcome reaches the bot — either the finished report or the fact that it failed.
 async function runInBackground(env: Env, until: Date): Promise<void> {
   try {
     const result = await runWeekly(env, until);
@@ -43,9 +45,10 @@ export default {
       return new Response("Forbidden", { status: 403 });
     }
 
-    // ?date=YYYY-MM-DD — прогон за неделю, оканчивающуюся этой датой (для тестов)
+    // ?date=YYYY-MM-DD — run for the week ending on that date (for testing).
+    // Interpreted as 09:00 local time in the configured TIMEZONE, DST included.
     const dateParam = url.searchParams.get("date");
-    const until = dateParam ? new Date(`${dateParam}T09:00:00+02:00`) : new Date();
+    const until = dateParam ? zonedTimeToUtc(dateParam, "09:00:00", loadConfig(env).timezone) : new Date();
     if (Number.isNaN(until.getTime())) {
       return new Response("Bad date", { status: 400 });
     }

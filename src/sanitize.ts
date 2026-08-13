@@ -1,15 +1,17 @@
 import type { AppState, WeekActivity } from "./types";
 
 /**
- * Страж данных: ЕДИНСТВЕННАЯ точка формирования payload для OpenAI.
+ * Data guard: the ONLY place where an LLM payload is assembled.
  *
- * Гарантии:
- * 1. Payload собирается явной проекцией — только перечисленные ниже примитивы
- *    (заголовки коммитов, названия PR/issues, счётчики, даты, языки).
- *    Код, диффы, патчи, содержимое файлов, URL — не попадают сюда by construction.
- * 2. assertSanitized() рекурсивно сверяет каждый ключ готового payload
- *    с allowlist и бросает ошибку на любом незнакомом ключе (fail-closed):
- *    если кто-то расширит типы активности, отправка в LLM упадёт, а не утечёт.
+ * Guarantees:
+ * 1. The payload is an explicit projection — only the primitives listed below
+ *    (commit headlines, PR/issue titles, counters, dates, languages). Source code,
+ *    diffs, patches, file contents and URLs cannot reach it by construction.
+ * 2. assertSanitized() walks the finished payload and throws on any key outside
+ *    the allowlist (fail-closed): if someone extends the activity types, the LLM
+ *    call breaks instead of silently leaking new fields.
+ * 3. Repositories redacted by the privacy policy (see privacy.ts) contribute
+ *    counters only — their names, commit messages and titles never get here.
  */
 
 const MAX_TEXT = 200;
@@ -80,7 +82,7 @@ export function assertSanitized(value: unknown, path = "$"): void {
   }
   for (const [key, v] of Object.entries(value)) {
     if (!ALLOWED_KEYS.has(key)) {
-      throw new Error(`LLM payload guard: незнакомый ключ "${key}" в ${path} — отправка в OpenAI заблокирована`);
+      throw new Error(`LLM payload guard: unexpected key "${key}" at ${path} — the LLM call was blocked`);
     }
     assertSanitized(v, `${path}.${key}`);
   }
@@ -92,7 +94,7 @@ export function buildLlmPayload(week: WeekActivity, state: AppState, newStreak: 
       since: week.since,
       until: week.until,
       repos: week.repos.map((r) => ({
-        repo: r.fullName,
+        repo: r.displayName,
         language: r.language,
         commitCount: r.commits.length,
         additions: r.additions,
@@ -100,10 +102,10 @@ export function buildLlmPayload(week: WeekActivity, state: AppState, newStreak: 
         ciSuccess: r.ciSuccess,
         ciFailure: r.ciFailure,
         deployments: r.deployments,
-        commitMessages: r.commits.map((c) => clip(c.message)),
+        commitMessages: r.redacted ? [] : r.commits.map((c) => clip(c.message)),
       })),
-      prs: week.prs.map((p) => ({ repo: p.repo, title: clip(p.title), state: p.state })),
-      issues: week.issues.map((i) => ({ repo: i.repo, title: clip(i.title), state: i.state })),
+      prs: week.prs.filter((p) => !p.redacted).map((p) => ({ repo: p.repo, title: clip(p.title), state: p.state })),
+      issues: week.issues.filter((i) => !i.redacted).map((i) => ({ repo: i.repo, title: clip(i.title), state: i.state })),
       totalCommits: week.totalCommits,
       totalAdditions: week.totalAdditions,
       totalDeletions: week.totalDeletions,

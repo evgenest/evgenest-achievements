@@ -2,11 +2,13 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "evgenest-achievements",
   "main": "src/index.ts",
-  "account_id": "REDACTED_ACCOUNT_ID",
+  // account_id is intentionally NOT committed. Set CLOUDFLARE_ACCOUNT_ID in the
+  // environment (locally and as a CI secret) when your API token can reach more
+  // than one account.
   "compatibility_date": "2026-07-31",
   "compatibility_flags": ["nodejs_compat"],
   "observability": {
-    "enabled": false,
+    "enabled": true,
     "head_sampling_rate": 1,
     "logs": {
       "enabled": true,
@@ -21,28 +23,45 @@
     }
   },
   "triggers": {
-    // Пятница 08:00 UTC = 10:00 Берлин летом / 09:00 зимой
-    // Cloudflare cron: дни недели 1=вс..7=сб (не как в обычном Unix cron), поэтому используем "fri" во избежание путаницы
+    // Cloudflare cron uses 1=Sun..7=Sat for numeric weekdays, so the named "fri" avoids
+    // the off-by-one trap. 08:00 UTC on Friday.
     "crons": ["0 8 * * fri"]
   },
   "kv_namespaces": [
     {
+      // Replace with your own namespace: `wrangler kv namespace create STATE`
       "binding": "STATE",
       "id": "REDACTED_KV_NAMESPACE_ID"
     }
   ],
   "vars": {
+    // GitHub account whose activity is summarized
     "GITHUB_USER": "evgenest",
+    // "<owner>/<repo>" the markdown reports are committed to. Keep it private if
+    // PRIVATE_REPOS is "full" — reports then contain private repo names and commit titles.
     "REPORTS_REPO": "your-github-login/your-reports-repo",
+    "REPORTS_DIR": "reports",
+    // Report language: "en" or "ru" (drives report copy, achievements and the LLM prompt)
     "REPORT_LANG": "ru",
-    "DEV_PROFILE": "Fullstack TypeScript/JavaScript developer based in Leipzig, Germany. Works with Cloudflare Workers, Node.js/Bun, React/Next.js, Telegram bots, AI/LLM integrations.",
-    // "openai" — напрямую в OpenAI; "vercel" — через Vercel AI Gateway (тот же провайдер моделей, единый биллинг)
+    "REPORT_TITLE": "EVGENEST Achievements",
+    // IANA time zone used for dates in the report and for time-based achievements
+    "TIMEZONE": "Europe/Berlin",
+    // ISO 4217 code used to render the salary estimate
+    "CURRENCY": "EUR",
+    // "full" — private repos appear as-is; "redact" — counted, but names, commit
+    // messages, titles and links are stripped; "skip" — excluded entirely.
+    "PRIVATE_REPOS": "full",
+    // Ask the model what the week would be worth on the market. Requires DEV_PROFILE.
+    "ENABLE_SALARY_ESTIMATE": "true",
+    // Upper bound on repositories inspected per run (GitHub API / subrequest budget)
+    "MAX_REPOS": "15",
+    // "openai" — OpenAI directly; "vercel" — through the Vercel AI Gateway
     "LLM_PROVIDER": "vercel",
-    // Формат зависит от LLM_PROVIDER: "vercel" (Gateway) требует "provider/model" (напр. "openai/gpt-5.6-luna"),
-    // "openai" (прямой API) — только имя модели без префикса провайдера (напр. "gpt-5.6-luna")
+    // Format depends on LLM_PROVIDER: "vercel" (Gateway) needs "provider/model",
+    // "openai" (direct API) takes the bare model name.
     "LLM_MODEL": "nvidia/nemotron-3-ultra-550b-a55b",
-    // Gateway отдаёт reasoning-уровни ("low"/"medium"/"high"/...), но конкретная модель может
-    // поддерживать только toggle (вкл/выкл) — тогда SDK сам сведёт значение к ближайшему уровню
+    // The Gateway exposes reasoning levels ("low"/"medium"/"high"/...), but a given model
+    // may only support an on/off toggle — the SDK then maps the value to the nearest level.
     "LLM_REASONING_EFFORT": "high"
   }
 }

@@ -21,7 +21,7 @@ export function isActiveWeek(week: WeekActivity): boolean {
   return week.totalCommits > 0 || week.prs.length > 0 || week.issues.length > 0;
 }
 
-/** Новое состояние после недели: стрик, тоталы, снапшот. Не мутирует вход. */
+/** Next state after a week: streak, totals, snapshot. Does not mutate the input. */
 export function advanceState(state: AppState, week: WeekActivity, newlyUnlocked: string[]): AppState {
   const active = isActiveWeek(week);
   const streak = active ? state.streak + 1 : 0;

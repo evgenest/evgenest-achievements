@@ -1,14 +1,25 @@
 {
   "name": "evgenest-achievements",
+  "version": "1.0.0",
   "private": true,
+  "license": "MIT",
+  "description": "Cloudflare Worker that turns a week of GitHub activity into an LLM-written markdown report, commits it to a repo and pings Telegram",
+  "keywords": ["cloudflare-workers", "github-api", "llm", "telegram-bot", "weekly-report"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/evgenest/evgenest-achievements.git"
+  },
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "types": "wrangler types",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "devDependencies": {
     "typescript": "^5.6.0",
+    "vitest": "^3.2.4",
     "wrangler": "^4.116.0"
   },
   "dependencies": {

@@ -1,3 +1,5 @@
+import type { Config } from "./config";
+import { getMessages, isLang } from "./i18n";
 import type { UnlockedAchievement } from "./types";
 
 async function send(env: Env, text: string, parseMode?: "HTML"): Promise<Response> {
@@ -12,9 +14,13 @@ async function send(env: Env, text: string, parseMode?: "HTML"): Promise<Respons
   });
 }
 
-/** Короткое sanitized-уведомление о падении фонового рана — без текста ошибки, детали только в логах Workers. */
+/**
+ * Short sanitized alert about a failed background run — no error text, details stay in
+ * the Workers logs. Takes env only: it must work even if config parsing is what broke.
+ */
 export async function notifyTelegramError(env: Env): Promise<void> {
-  const res = await send(env, "⚠️ Еженедельный отчёт не сформирован — ошибка при обработке. Подробности в логах Workers.");
+  const lang = isLang(env.REPORT_LANG ?? "") ? env.REPORT_LANG : "en";
+  const res = await send(env, getMessages(lang).telegram.failed);
   if (!res.ok) {
     throw new Error(`Telegram sendMessage (error alert) -> ${res.status}: ${await res.text()}`);
   }
@@ -22,21 +28,23 @@ export async function notifyTelegramError(env: Env): Promise<void> {
 
 export async function notifyTelegram(
   env: Env,
+  config: Config,
   llmMessage: string,
   achievements: UnlockedAchievement[],
   reportUrl: string,
 ): Promise<void> {
+  const m = config.messages.telegram;
   const parts = [llmMessage];
   if (achievements.length > 0) {
-    parts.push(`Новые ачивки: ${achievements.map((a) => `<b>${a.title}</b>`).join(", ")}`);
+    parts.push(m.newAchievements(achievements.map((a) => `<b>${a.title}</b>`).join(", ")));
   }
-  parts.push(`<a href="${reportUrl}">Открыть полный отчёт</a>`);
+  parts.push(`<a href="${reportUrl}">${m.openReport}</a>`);
   const html = parts.join("\n\n");
 
   const res = await send(env, html, "HTML");
   if (res.ok) return;
 
-  // LLM мог сгенерировать невалидный HTML — повторяем без разметки, чтобы уведомление дошло
+  // The LLM may have produced invalid HTML — retry without markup so the message lands
   const stripped = html.replace(/<[^>]+>/g, "");
   const fallback = await send(env, `${stripped}\n\n${reportUrl}`);
   if (!fallback.ok) {

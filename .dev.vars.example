@@ -1,4 +1,4 @@
-# Скопировать в .dev.vars для локальной разработки, боевые значения — через `wrangler secret put`
+# Copy to .dev.vars for local development. Production values go through `wrangler secret put`.
 GITHUB_TOKEN=""
 GITHUB_REPORTS_TOKEN=""
 OPENAI_API_KEY=""
@@ -6,3 +6,6 @@ VERCEL_AI_GATEWAY_API_KEY=""
 TELEGRAM_BOT_TOKEN=""
 TELEGRAM_CHAT_ID=""
 RUN_SECRET=""
+# Free-form developer profile fed to the model (stack, seniority, region).
+# Kept out of the repo on purpose: it is personal data and it drives the salary estimate.
+DEV_PROFILE=""

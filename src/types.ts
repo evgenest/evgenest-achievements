@@ -8,7 +8,11 @@ export interface CommitInfo {
 
 export interface RepoActivity {
   fullName: string;
+  /** Name safe to publish: equals fullName unless the repo was redacted. */
+  displayName: string;
   isPrivate: boolean;
+  /** True when names, messages and links of this repo must not be exposed. */
+  redacted: boolean;
   language: string | null;
   url: string;
   commits: CommitInfo[];
@@ -22,6 +26,8 @@ export interface RepoActivity {
 export interface PrInfo {
   title: string;
   repo: string;
+  isPrivate: boolean;
+  redacted: boolean;
   state: "open" | "merged" | "closed";
   url: string;
 }
@@ -29,6 +35,8 @@ export interface PrInfo {
 export interface IssueInfo {
   title: string;
   repo: string;
+  isPrivate: boolean;
+  redacted: boolean;
   state: string;
   url: string;
 }
@@ -68,25 +76,27 @@ export interface AppState {
   allTime: StateTotals;
   unlocked: string[];
   lastWeek: WeekSnapshot | null;
-  lastRunUntil: string | null; // ISO — конец периода последнего успешного рана
+  lastRunUntil: string | null; // ISO — end of the period of the last successful run
+}
+
+export interface SalaryEstimate {
+  /** Amounts are in the currency configured via CURRENCY. */
+  employeeWeek: number;
+  freelanceWeek: number;
+  rationale: string;
 }
 
 export interface LlmResult {
   projectSummaries: { repo: string; summary: string }[];
   hoursEstimate: number;
-  salary: {
-    employeeWeekEur: number;
-    freelanceWeekEur: number;
-    rationale: string;
-  };
+  /** Present only when ENABLE_SALARY_ESTIMATE is on. */
+  salary?: SalaryEstimate;
   praise: string;
   telegramMessage: string;
 }
 
 export interface AchievementDef {
   id: string;
-  title: string;
-  description: string;
   test: (week: WeekActivity, newStreak: number, allTimeCommits: number) => boolean;
 }
 
