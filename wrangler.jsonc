@@ -76,5 +76,20 @@
     // The Gateway exposes reasoning levels ("low"/"medium"/"high"/...), but a given model
     // may only support an on/off toggle — the SDK then maps the value to the nearest level.
     "LLM_REASONING_EFFORT": "medium"
+  },
+  // Names only — no values. `wrangler types` reads this instead of inferring secret
+  // names from .dev.vars, so CI can generate correct types without ever touching a
+  // vars/secrets file. `wrangler dev` also warns if one of these isn't set locally.
+  "secrets": {
+    "required": [
+      "GITHUB_TOKEN",
+      "GITHUB_REPORTS_TOKEN",
+      "OPENAI_API_KEY",
+      "VERCEL_AI_GATEWAY_API_KEY",
+      "TELEGRAM_BOT_TOKEN",
+      "TELEGRAM_CHAT_ID",
+      "RUN_SECRET",
+      "DEV_PROFILE"
+    ]
   }
 }

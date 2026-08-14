@@ -1,10 +1,10 @@
 name: CI
 
+# Gates pull requests only. Pushes to main are covered by deploy.yml, which runs the
+# same generate-types/typecheck/test steps before deploying — a push-to-main trigger
+# here would just duplicate that in parallel for no benefit.
 on:
   pull_request:
-  push:
-    branches:
-      - main
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -26,13 +26,11 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # worker-configuration.d.ts is generated, not committed. `wrangler types` reads the
-      # var names from wrangler.jsonc and the secret names from .dev.vars — the example
-      # file carries the same keys with empty values, which is all typing needs.
+      # worker-configuration.d.ts is generated, not committed. `wrangler types` gets var
+      # names and types from wrangler.jsonc's "vars", and secret names from its
+      # "secrets": { "required": [...] } — no .dev.vars file needed just to typecheck.
       - name: Generate worker types
-        run: |
-          cp -n .dev.vars.example .dev.vars
-          bun run types
+        run: bun run types
 
       - name: Typecheck
         run: bun run check

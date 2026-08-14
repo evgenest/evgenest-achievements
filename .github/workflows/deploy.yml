@@ -35,9 +35,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Generate worker types
-        run: |
-          cp -n .dev.vars.example .dev.vars
-          bun run types
+        run: bun run types
 
       - name: Typecheck
         run: bun run check
@@ -47,10 +45,7 @@ jobs:
 
       - name: Prepare CI wrangler config
         if: env.HAS_DEPLOY_SECRETS == 'true'
-        # The .dev.vars written above holds empty placeholders and exists only for typing.
-        # Deploy never reads it, but it has no business being around during one either.
         run: |
-          rm -f .dev.vars
           sed -e "s#__WORKER_NAME__#${CF_WORKER_NAME}#" \
               -e "s#__KV_NAMESPACE_ID__#${CF_KV_NAMESPACE_ID}#" \
               -e "s#__QUEUE_NAME__#${CF_QUEUE_NAME}#" \
