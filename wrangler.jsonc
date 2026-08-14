@@ -38,6 +38,15 @@
       "id": "0000000000000000000000000000000000000000000000000000000000000000"
     }
   ],
+  // /run enqueues the actual work here instead of running it in ctx.waitUntil(): an
+  // HTTP-triggered invocation's waitUntil is capped at 30s by Cloudflare, which a full run
+  // (GitHub collection + LLM call + report commit + Telegram) can exceed. The queue consumer
+  // gets the same 15-minute budget as the cron trigger. Create it once:
+  // `wrangler queues create your-queue-name`
+  "queues": {
+    "producers": [{ "binding": "RUN_QUEUE", "queue": "your-queue-name" }],
+    "consumers": [{ "queue": "your-queue-name", "max_batch_size": 1 }]
+  },
   "vars": {
     // GitHub account whose activity is summarized
     "GITHUB_USER": "your-github-login",

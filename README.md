@@ -113,12 +113,15 @@ it as a repository secret if your API token can reach more than one account.
 
 `.github/workflows/deploy.yml` deploys on every push to `main`, but it never touches vars.
 It builds its own config from the committed `wrangler.ci.jsonc` (structural fields only — no
-`vars` block, `keep_vars: true`) with your worker name and KV namespace id substituted in from
-two small repository secrets, then deploys. Because CI's config carries no vars and `keep_vars`
-is set, a code deploy can never overwrite or roll back whatever vars are currently live on the
-Worker — those only ever change when you run `bun run deploy:prod` yourself from your local
-`wrangler.prod.jsonc`. Run that once after any change to vars (model, provider, report settings,
-…); pushing to `main` alone will not pick them up.
+`vars` block, `keep_vars: true`) with your worker name, KV namespace id and queue name
+substituted in from small repository secrets, then deploys. Because CI's config carries no vars
+and `keep_vars` is set, a code deploy can never overwrite or roll back whatever vars are
+currently live on the Worker — those only ever change when you run `bun run deploy:prod`
+yourself from your local `wrangler.prod.jsonc`. Run that once after any change to vars (model,
+provider, report settings, …); pushing to `main` alone will not pick them up.
+
+Create the queue once (any name) and reuse it in both `wrangler.prod.jsonc` and the
+`CF_QUEUE_NAME` secret: `wrangler queues create <your-queue-name>`.
 
 | Repository secret | Value |
 |---|---|
@@ -126,6 +129,7 @@ Worker — those only ever change when you run `bun run deploy:prod` yourself fr
 | `CLOUDFLARE_ACCOUNT_ID` | Only if the token can reach several accounts |
 | `CF_WORKER_NAME` | Your real worker name (matches `wrangler.prod.jsonc`) |
 | `CF_KV_NAMESPACE_ID` | Your real `STATE` KV namespace id |
+| `CF_QUEUE_NAME` | Your real `RUN_QUEUE` queue name |
 
 ## Running it
 
@@ -143,7 +147,7 @@ bun run deploy    # or deploy:prod, see above
 `.dev.vars` matter for typing, so `.dev.vars.example` is enough to typecheck (that is what CI
 copies).
 
-Manual run: `curl -H "Authorization: Bearer <RUN_SECRET>" https://<worker-url>/run`, optionally with `?date=YYYY-MM-DD` for the week ending on that date (interpreted at 09:00 local time in `TIMEZONE`). The endpoint answers `202` immediately and finishes the run in the background.
+Manual run: `curl -H "Authorization: Bearer <RUN_SECRET>" https://<worker-url>/run`, optionally with `?date=YYYY-MM-DD` for the week ending on that date (interpreted at 09:00 local time in `TIMEZONE`). The endpoint answers `202` immediately and hands the run off to the `RUN_QUEUE` queue, which processes it with the same 15-minute budget as the cron trigger — an HTTP-triggered `ctx.waitUntil()` is capped at 30s by Cloudflare, too short for GitHub collection + an LLM call + the report commit.
 
 ## State history
 

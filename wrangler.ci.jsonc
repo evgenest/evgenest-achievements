@@ -1,8 +1,8 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   // Structural-only config used by CI (.github/workflows/deploy.yml) to deploy code without
-  // touching vars. __WORKER_NAME__ / __KV_NAMESPACE_ID__ are substituted from repository
-  // secrets at deploy time. See README "Your own deployment" for the full picture.
+  // touching vars. __WORKER_NAME__ / __KV_NAMESPACE_ID__ / __QUEUE_NAME__ are substituted from
+  // repository secrets at deploy time. See README "Your own deployment" for the full picture.
   "name": "__WORKER_NAME__",
   "main": "src/index.ts",
   // account_id is intentionally NOT committed. Set CLOUDFLARE_ACCOUNT_ID as a repository
@@ -35,6 +35,10 @@
       "id": "__KV_NAMESPACE_ID__"
     }
   ],
+  "queues": {
+    "producers": [{ "binding": "RUN_QUEUE", "queue": "__QUEUE_NAME__" }],
+    "consumers": [{ "queue": "__QUEUE_NAME__", "max_batch_size": 1 }]
+  },
   // No "vars" block on purpose. Combined with keep_vars, CI deploys never touch the vars
   // already live on the Worker — those are only ever set by `bun run deploy:prod` from your
   // local, gitignored wrangler.prod.jsonc. This is what makes config drift between the repo

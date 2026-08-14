@@ -19,6 +19,10 @@ async function authorized(request: Request, env: Env): Promise<boolean> {
   return Boolean(env.RUN_SECRET) && (await keyMatches(key, env.RUN_SECRET));
 }
 
+interface RunMessage {
+  until: string; // ISO
+}
+
 // The full error goes to the Workers logs only (private, requires Cloudflare account access).
 // Telegram gets a short sanitized notice without the error text: either way the week's
 // outcome reaches the bot — either the finished report or the fact that it failed.
@@ -41,7 +45,14 @@ export default {
     ctx.waitUntil(runInBackground(env, new Date()));
   },
 
-  async fetch(request, env, ctx) {
+  // A batch always holds messages sent by /run below — one per manual (or ?date=) request.
+  async queue(batch: MessageBatch<RunMessage>, env) {
+    for (const message of batch.messages) {
+      await runInBackground(env, new Date(message.body.until));
+    }
+  },
+
+  async fetch(request, env) {
     const url = new URL(request.url);
     const route = `${request.method} ${url.pathname}`;
     if (!["POST /run", "GET /run", "GET /state", "DELETE /state/latest"].includes(route)) {
@@ -75,7 +86,10 @@ export default {
       return new Response("Bad date", { status: 400 });
     }
 
-    ctx.waitUntil(runInBackground(env, until));
+    // Handed off to RUN_QUEUE instead of ctx.waitUntil(): an HTTP-triggered invocation's
+    // waitUntil is capped at 30s by Cloudflare, too short for GitHub collection + LLM + commit.
+    // The queue consumer above gets the same 15-minute budget as the cron trigger.
+    await env.RUN_QUEUE.send({ until: until.toISOString() } satisfies RunMessage);
     return Response.json({ status: "accepted" }, { status: 202 });
   },
-} satisfies ExportedHandler<Env>;
+} satisfies ExportedHandler<Env, RunMessage>;

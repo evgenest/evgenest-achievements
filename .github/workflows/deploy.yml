@@ -19,11 +19,11 @@ jobs:
     permissions:
       contents: read
     env:
-      # wrangler.ci.jsonc in the repo holds every structural field except the worker name and
-      # KV namespace id, which come from small repository secrets. Vars are never part of this —
-      # they're only ever set by `bun run deploy:prod` from your local wrangler.prod.jsonc, and
-      # `keep_vars` in wrangler.ci.jsonc keeps CI from touching them.
-      HAS_DEPLOY_SECRETS: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CF_WORKER_NAME != '' && secrets.CF_KV_NAMESPACE_ID != '' }}
+      # wrangler.ci.jsonc in the repo holds every structural field except the worker name, KV
+      # namespace id and queue name, which come from small repository secrets. Vars are never
+      # part of this — they're only ever set by `bun run deploy:prod` from your local
+      # wrangler.prod.jsonc, and `keep_vars` in wrangler.ci.jsonc keeps CI from touching them.
+      HAS_DEPLOY_SECRETS: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CF_WORKER_NAME != '' && secrets.CF_KV_NAMESPACE_ID != '' && secrets.CF_QUEUE_NAME != '' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -53,10 +53,12 @@ jobs:
           rm -f .dev.vars
           sed -e "s#__WORKER_NAME__#${CF_WORKER_NAME}#" \
               -e "s#__KV_NAMESPACE_ID__#${CF_KV_NAMESPACE_ID}#" \
+              -e "s#__QUEUE_NAME__#${CF_QUEUE_NAME}#" \
               wrangler.ci.jsonc > wrangler.prod.jsonc
         env:
           CF_WORKER_NAME: ${{ secrets.CF_WORKER_NAME }}
           CF_KV_NAMESPACE_ID: ${{ secrets.CF_KV_NAMESPACE_ID }}
+          CF_QUEUE_NAME: ${{ secrets.CF_QUEUE_NAME }}
 
       - name: Deploy
         if: env.HAS_DEPLOY_SECRETS == 'true'
