@@ -111,15 +111,21 @@ namespace id is a placeholder. Two ways to make it yours:
 `account_id` is deliberately absent from both. Export `CLOUDFLARE_ACCOUNT_ID` locally and add
 it as a repository secret if your API token can reach more than one account.
 
-`.github/workflows/deploy.yml` deploys on every push to `main`, using the second layout: it
-skips itself on forks and whenever the secrets are missing, and otherwise restores
-`wrangler.prod.jsonc` from a repository secret before deploying.
+`.github/workflows/deploy.yml` deploys on every push to `main`, but it never touches vars.
+It builds its own config from the committed `wrangler.ci.jsonc` (structural fields only — no
+`vars` block, `keep_vars: true`) with your worker name and KV namespace id substituted in from
+two small repository secrets, then deploys. Because CI's config carries no vars and `keep_vars`
+is set, a code deploy can never overwrite or roll back whatever vars are currently live on the
+Worker — those only ever change when you run `bun run deploy:prod` yourself from your local
+`wrangler.prod.jsonc`. Run that once after any change to vars (model, provider, report settings,
+…); pushing to `main` alone will not pick them up.
 
 | Repository secret | Value |
 |---|---|
 | `CLOUDFLARE_API_TOKEN` | API token with Workers deploy permissions |
 | `CLOUDFLARE_ACCOUNT_ID` | Only if the token can reach several accounts |
-| `WRANGLER_CONFIG_B64` | `base64 -w0 wrangler.prod.jsonc` |
+| `CF_WORKER_NAME` | Your real worker name (matches `wrangler.prod.jsonc`) |
+| `CF_KV_NAMESPACE_ID` | Your real `STATE` KV namespace id |
 
 ## Running it
 

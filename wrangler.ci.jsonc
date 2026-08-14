@@ -1,0 +1,43 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Structural-only config used by CI (.github/workflows/deploy.yml) to deploy code without
+  // touching vars. __WORKER_NAME__ / __KV_NAMESPACE_ID__ are substituted from repository
+  // secrets at deploy time. See README "Your own deployment" for the full picture.
+  "name": "__WORKER_NAME__",
+  "main": "src/index.ts",
+  // account_id is intentionally NOT committed. Set CLOUDFLARE_ACCOUNT_ID as a repository
+  // secret when your API token can reach more than one account.
+  "compatibility_date": "2026-07-31",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": true,
+      "invocation_logs": true
+    },
+    "traces": {
+      "enabled": true,
+      "persist": true,
+      "head_sampling_rate": 1
+    }
+  },
+  "triggers": {
+    // Cloudflare cron uses 1=Sun..7=Sat for numeric weekdays, so the named "fri" avoids
+    // the off-by-one trap. 08:00 UTC on Friday.
+    "crons": ["0 8 * * fri"]
+  },
+  "kv_namespaces": [
+    {
+      "binding": "STATE",
+      "id": "__KV_NAMESPACE_ID__"
+    }
+  ],
+  // No "vars" block on purpose. Combined with keep_vars, CI deploys never touch the vars
+  // already live on the Worker — those are only ever set by `bun run deploy:prod` from your
+  // local, gitignored wrangler.prod.jsonc. This is what makes config drift between the repo
+  // and the deployed Worker structurally impossible instead of a discipline problem.
+  "keep_vars": true
+}

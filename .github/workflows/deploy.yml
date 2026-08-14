@@ -19,9 +19,11 @@ jobs:
     permissions:
       contents: read
     env:
-      # wrangler.jsonc in the repo is a template with placeholder ids. The real config
-      # (worker name, KV namespace id, vars) lives in a base64-encoded repository secret.
-      HAS_DEPLOY_SECRETS: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.WRANGLER_CONFIG_B64 != '' }}
+      # wrangler.ci.jsonc in the repo holds every structural field except the worker name and
+      # KV namespace id, which come from small repository secrets. Vars are never part of this —
+      # they're only ever set by `bun run deploy:prod` from your local wrangler.prod.jsonc, and
+      # `keep_vars` in wrangler.ci.jsonc keeps CI from touching them.
+      HAS_DEPLOY_SECRETS: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CF_WORKER_NAME != '' && secrets.CF_KV_NAMESPACE_ID != '' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -43,15 +45,18 @@ jobs:
       - name: Test
         run: bun run test
 
-      - name: Restore production wrangler config
+      - name: Prepare CI wrangler config
         if: env.HAS_DEPLOY_SECRETS == 'true'
         # The .dev.vars written above holds empty placeholders and exists only for typing.
         # Deploy never reads it, but it has no business being around during one either.
         run: |
           rm -f .dev.vars
-          printf '%s' "$WRANGLER_CONFIG_B64" | base64 -d > wrangler.prod.jsonc
+          sed -e "s#__WORKER_NAME__#${CF_WORKER_NAME}#" \
+              -e "s#__KV_NAMESPACE_ID__#${CF_KV_NAMESPACE_ID}#" \
+              wrangler.ci.jsonc > wrangler.prod.jsonc
         env:
-          WRANGLER_CONFIG_B64: ${{ secrets.WRANGLER_CONFIG_B64 }}
+          CF_WORKER_NAME: ${{ secrets.CF_WORKER_NAME }}
+          CF_KV_NAMESPACE_ID: ${{ secrets.CF_KV_NAMESPACE_ID }}
 
       - name: Deploy
         if: env.HAS_DEPLOY_SECRETS == 'true'
@@ -66,4 +71,4 @@ jobs:
 
       - name: Skipped
         if: env.HAS_DEPLOY_SECRETS != 'true'
-        run: echo "CLOUDFLARE_API_TOKEN / WRANGLER_CONFIG_B64 not set — deployment skipped."
+        run: echo "CLOUDFLARE_API_TOKEN / CF_WORKER_NAME / CF_KV_NAMESPACE_ID not set — deployment skipped."
