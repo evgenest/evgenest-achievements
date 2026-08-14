@@ -22,7 +22,7 @@ Credentials it is given (all as Workers secrets, never as vars):
 | `OPENAI_API_KEY` / `VERCEL_AI_GATEWAY_API_KEY` | LLM spend on your account |
 | `TELEGRAM_BOT_TOKEN` | Control of the notification bot |
 | `RUN_SECRET` | Ability to trigger extra runs (cost, no data exfiltration), to list the state history (counters only) and to delete its newest snapshot |
-| `DEV_PROFILE` | Personal data in the prompt (stack, seniority, region) |
+| `DEV_PROFILE` | Personal data in the prompt (career history, stack, clients, income) — see README |
 
 Use fine-grained PATs and split them as the README describes: the scanning token needs
 no write access anywhere, and the reports token needs no access outside the reports
@@ -50,6 +50,12 @@ repository.
 - **`PRIVATE_REPOS` is a privacy control, not a security boundary.** With `full`, reports
   contain private repository names and commit titles — the reports repository must then be
   private. `redact` is the default for that reason.
+- **CI cannot see or change vars/secrets, structurally.** `.github/workflows/deploy.yml` deploys
+  with `wrangler.ci.jsonc`, which carries no `vars` block and sets `keep_vars: true` — Cloudflare
+  then leaves whatever is already live untouched. Vars and secrets only ever change from your own
+  machine (`bun run deploy:prod`, `wrangler secret put`). A compromised CI run, or a leaked
+  `CLOUDFLARE_API_TOKEN` with only deploy scope, cannot read or roll back `DEV_PROFILE` or any
+  other var/secret this way.
 
 ## Out of scope
 

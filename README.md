@@ -23,6 +23,7 @@ cron (weekly)
 - **LLM**: OpenAI Responses API directly, or the same models through the Vercel AI Gateway (`@ai-sdk/gateway` + `ai`) — switched with `LLM_PROVIDER`. Structured output either way
 - **Workers KV**: streak, all-time totals, unlocked achievements, previous-week snapshot — appended as a new snapshot per run, so a test run can be rolled back (see [State history](#state-history))
 - **Telegram Bot API**: outbound `sendMessage` only, no webhook
+- Every report ends with a `provider/model` signature line, so a report stays self-describing even after `LLM_PROVIDER`/`LLM_MODEL` change later
 
 ## Modules
 
@@ -98,6 +99,22 @@ Secrets (`wrangler secret put <NAME>`, or `.dev.vars` locally — see `.dev.vars
 | `RUN_SECRET` | Any string; the bearer token for manual runs |
 | `DEV_PROFILE` | Free-form developer profile for the prompt (stack, seniority, region). A secret rather than a var: it is personal data and it drives the salary estimate |
 
+If `DEV_PROFILE` grows past a one-liner, keep it as a gitignored `DEV_PROFILE.md` (Markdown
+headings are fine — the prompt reads it as plain text) and run `bun run sync:dev-profile` to
+copy it into `.dev.vars` for local dev. It deliberately never touches `wrangler.prod.jsonc` —
+`DEV_PROFILE` is a secret, not a var — so push it to the live Worker with:
+
+```bash
+bun run secret:dev-profile
+```
+
+That's `deploy:prod` followed by `sync-dev-profile.ts --print | wrangler secret put DEV_PROFILE`,
+in that order on purpose: Cloudflare refuses to create a secret with the same name as a var
+that's still live (`Binding name 'DEV_PROFILE' already in use`), and `deploy:prod` is what clears
+a stale var — it replaces the live var set with the current `vars` block, which no longer lists
+`DEV_PROFILE`. This is a general Cloudflare rule, not specific to `DEV_PROFILE` — it applies to
+any binding moved from `vars` to a secret, or back.
+
 ### Your own deployment
 
 The committed `wrangler.jsonc` will not deploy as-is: the worker name is generic and the KV
@@ -111,7 +128,9 @@ namespace id is a placeholder. Two ways to make it yours:
 `account_id` is deliberately absent from both. Export `CLOUDFLARE_ACCOUNT_ID` locally and add
 it as a repository secret if your API token can reach more than one account.
 
-`.github/workflows/deploy.yml` deploys on every push to `main`, but it never touches vars.
+`.github/workflows/ci.yml` runs typecheck + test on every pull request — it's the PR gate,
+and the only workflow that fires on `pull_request`. `.github/workflows/deploy.yml` deploys on
+every push to `main`, but it never touches vars.
 It builds its own config from the committed `wrangler.ci.jsonc` (structural fields only — no
 `vars` block, `keep_vars: true`) with your worker name, KV namespace id and queue name
 substituted in from small repository secrets, then deploys. Because CI's config carries no vars
@@ -136,16 +155,20 @@ Create the queue once (any name) and reuse it in both `wrangler.prod.jsonc` and 
 ```bash
 bun install
 cp .dev.vars.example .dev.vars   # fill in for local runs
-bun run types     # generates worker-configuration.d.ts from wrangler.jsonc + .dev.vars
+bun run types     # generates worker-configuration.d.ts from wrangler.jsonc
 bun run check     # tsc --noEmit
 bun run test      # vitest
 bun run deploy    # or deploy:prod, see above
 ```
 
+`scripts/` (maintenance tooling, e.g. `sync-dev-profile.ts`) has its own `scripts/tsconfig.json`
+with Bun's ambient types, since `src`/`test` deliberately type-check against the Workers runtime
+only — `bun run check:scripts` typechecks that side.
+
 `worker-configuration.d.ts` is generated, not committed — run `bun run types` after
-`bun install` and after every change to `wrangler.jsonc` or `.dev.vars`. Only the *keys* of
-`.dev.vars` matter for typing, so `.dev.vars.example` is enough to typecheck (that is what CI
-copies).
+`bun install` and after every change to `wrangler.jsonc`. Typing needs no local file at all:
+var types come from `wrangler.jsonc`'s `"vars"`, secret names from its
+`"secrets": { "required": [...] }` — that's also what CI runs, with no `.dev.vars` in sight.
 
 Manual run: `curl -H "Authorization: Bearer <RUN_SECRET>" https://<worker-url>/run`, optionally with `?date=YYYY-MM-DD` for the week ending on that date (interpreted at 09:00 local time in `TIMEZONE`). The endpoint answers `202` immediately and hands the run off to the `RUN_QUEUE` queue, which processes it with the same 15-minute budget as the cron trigger — an HTTP-triggered `ctx.waitUntil()` is capped at 30s by Cloudflare, too short for GitHub collection + an LLM call + the report commit.
 
