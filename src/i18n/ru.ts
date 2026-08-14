@@ -43,6 +43,7 @@ export const ru: Messages = {
     },
     allTimeLine: ({ commits, prs, issues, weeks, achievements }) =>
       `Коммитов: ${commits} · PR: ${prs} · Issues: ${issues} · Активных недель: ${weeks} · Ачивок: ${achievements}`,
+    generatedBy: (provider, model) => `_Составлено: ${provider}/${model}_`,
   },
   achievements: {
     "first-report": { title: "Начало положено", description: "Первый еженедельный отчёт" },

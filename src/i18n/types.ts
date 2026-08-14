@@ -47,6 +47,7 @@ export interface Messages {
     redactedNote: string;
     cost: { hours: (hours: string) => string; office: (money: string) => string; freelance: (money: string) => string };
     allTimeLine: (parts: { commits: string; prs: string; issues: string; weeks: string; achievements: string }) => string;
+    generatedBy: (provider: string, model: string) => string;
   };
   achievements: Record<string, { title: string; description: string }>;
   telegram: { failed: string; newAchievements: (list: string) => string; openReport: string };

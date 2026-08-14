@@ -43,6 +43,7 @@ export const en: Messages = {
     },
     allTimeLine: ({ commits, prs, issues, weeks, achievements }) =>
       `Commits: ${commits} · PRs: ${prs} · Issues: ${issues} · Active weeks: ${weeks} · Achievements: ${achievements}`,
+    generatedBy: (provider, model) => `_Written by ${provider}/${model}_`,
   },
   achievements: {
     "first-report": { title: "Off the ground", description: "First weekly report" },

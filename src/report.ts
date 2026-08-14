@@ -161,5 +161,8 @@ export function buildReport({ config, week, state, newStreak, achievements, llm 
   );
   lines.push("");
 
+  lines.push(m.generatedBy(config.llm.provider, config.llm.model));
+  lines.push("");
+
   return lines.join("\n");
 }
