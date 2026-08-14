@@ -8,4 +8,6 @@ TELEGRAM_CHAT_ID=""
 RUN_SECRET=""
 # Free-form developer profile fed to the model (stack, seniority, region).
 # Kept out of the repo on purpose: it is personal data and it drives the salary estimate.
+# If it grows past a one-liner, write it as a gitignored DEV_PROFILE.md and run
+# `bun run sync:dev-profile` — see README "Configuration".
 DEV_PROFILE=""
