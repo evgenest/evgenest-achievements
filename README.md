@@ -18,10 +18,10 @@ cron (weekly)
                            └─ persist streak / totals / achievements in KV
 ```
 
-- **Cloudflare Worker** with a cron trigger, plus an authenticated `/run` endpoint for manual runs
+- **Cloudflare Worker** with a cron trigger, plus authenticated `/run` and `/state` endpoints for manual runs and rolling them back
 - **GitHub API**: REST (repo list, PR/issue search, committing the report) and GraphQL (commits with per-commit stats in a single request)
 - **LLM**: OpenAI Responses API directly, or the same models through the Vercel AI Gateway (`@ai-sdk/gateway` + `ai`) — switched with `LLM_PROVIDER`. Structured output either way
-- **Workers KV**: streak, all-time totals, unlocked achievements, previous-week snapshot
+- **Workers KV**: streak, all-time totals, unlocked achievements, previous-week snapshot — appended as a new snapshot per run, so a test run can be rolled back (see [State history](#state-history))
 - **Telegram Bot API**: outbound `sendMessage` only, no webhook
 
 ## Modules
@@ -36,7 +36,7 @@ src/sanitize.ts     — data guard for everything sent to the LLM
 src/llm.ts          — prompt and model call
 src/report.ts       — markdown assembly
 src/telegram.ts     — notifications
-src/state.ts        — KV-backed state
+src/state.ts        — KV-backed state (append-only snapshot history)
 src/achievements.ts — achievement rules
 src/i18n/           — all user-facing copy (en, ru)
 src/time.ts         — time-zone-aware date helpers
@@ -138,6 +138,76 @@ bun run deploy    # or deploy:prod, see above
 copies).
 
 Manual run: `curl -H "Authorization: Bearer <RUN_SECRET>" https://<worker-url>/run`, optionally with `?date=YYYY-MM-DD` for the week ending on that date (interpreted at 09:00 local time in `TIMEZONE`). The endpoint answers `202` immediately and finishes the run in the background.
+
+## State history
+
+State is append-only. Every run writes a new snapshot under `state:<ISO timestamp>` in KV, and
+the newest key is the live state. That makes manual runs — trying a different model, provider or
+config — reversible: delete the snapshot the run appended and the previous one becomes current
+again, so the next run picks up the real streak and totals instead of building on a half-baked
+test run.
+
+The loop this is meant for — try a change, look at the report, throw the run away if the change
+was wrong:
+
+```bash
+export AUTH="Authorization: Bearer <RUN_SECRET>"
+
+curl -H "$AUTH" https://<worker-url>/run          # 202, report lands in the reports repo
+                                                  # read it; not happy with the result?
+curl -X DELETE -H "$AUTH" https://<worker-url>/state/latest   # drop what that run wrote
+# change the code or the vars (model, provider, tone, privacy mode), then:
+bun run deploy:prod
+curl -H "$AUTH" https://<worker-url>/run          # same week, same starting state, new output
+```
+
+Each iteration rewrites the same `reports/YYYY-MM-DD.md` and sends another Telegram message, but
+streaks, totals and achievements stay honest — the next real cron run continues from the snapshot
+that was live before you started.
+
+```bash
+# what the history looks like (oldest first, last entry is live)
+curl -H "Authorization: Bearer <RUN_SECRET>" https://<worker-url>/state
+```
+
+```json
+{
+  "current": "state:2026-08-14T08:00:04.512Z",
+  "versions": [
+    {
+      "key": "state:2026-08-07T08:00:03.907Z",
+      "meta": { "savedAt": "2026-08-07T08:00:03.907Z", "until": "2026-08-07T08:00:00.000Z", "reportCount": 12, "streak": 5 }
+    },
+    {
+      "key": "state:2026-08-14T08:00:04.512Z",
+      "meta": { "savedAt": "2026-08-14T08:00:04.512Z", "until": "2026-08-14T08:00:00.000Z", "reportCount": 13, "streak": 6 }
+    }
+  ]
+}
+```
+
+```bash
+# undo the newest run
+curl -X DELETE -H "Authorization: Bearer <RUN_SECRET>" https://<worker-url>/state/latest
+```
+
+```json
+{ "deleted": "state:2026-08-14T08:00:04.512Z" }
+```
+
+With no snapshots left to delete the answer is `404` with `{ "error": "no state snapshots" }`.
+Both endpoints use the same bearer token as `/run`. The listing is served from KV metadata
+(`savedAt`, `until`, `reportCount`, `streak`), so it costs one `list` call. `run_done` in the
+Workers logs carries the `stateKey` the run wrote, if you would rather delete it with
+`wrangler kv key delete --binding STATE '<key>'`.
+
+Notes:
+
+- The last 52 snapshots are kept; older ones are pruned on write.
+- KV reads are eventually consistent (up to ~60s), so leave a few seconds between deleting a
+  snapshot and re-running.
+- With no snapshots at all, the pre-versioning `state` key is read once as a fallback; after
+  that the versioned snapshots always win.
 
 ## Known limitations
 

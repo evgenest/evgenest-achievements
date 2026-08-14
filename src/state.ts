@@ -1,6 +1,16 @@
 import type { AppState, WeekActivity } from "./types";
 
-const KEY = "state";
+/**
+ * State is append-only: every run writes a new snapshot under `state:<ISO timestamp>`,
+ * and the lexicographically last key (= chronologically newest) is the live state.
+ * A manual test run can therefore be undone by deleting just that key — the previous
+ * snapshot becomes current again and the next report is built on top of it.
+ */
+const PREFIX = "state:";
+/** Pre-versioning single key. Read only while no versioned snapshot exists. */
+const LEGACY_KEY = "state";
+/** Snapshots kept in KV (~a year of weekly runs); older ones are pruned after each save. */
+const HISTORY_LIMIT = 52;
 
 const EMPTY_STATE: AppState = {
   reportCount: 0,
@@ -12,9 +22,40 @@ const EMPTY_STATE: AppState = {
   lastRunUntil: null,
 };
 
+/** Stored alongside the snapshot so the history can be listed without reading every value. */
+export interface StateMeta {
+  savedAt: string; // ISO — when the snapshot was written
+  until: string | null; // ISO — end of the period the snapshot covers
+  reportCount: number;
+  streak: number;
+}
+
+export interface StateVersion {
+  key: string;
+  meta: StateMeta | null;
+}
+
+/** All snapshots, oldest first — KV lists keys in lexicographic order. */
+export async function listStateVersions(env: Env): Promise<StateVersion[]> {
+  const versions: StateVersion[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await env.STATE.list<StateMeta>({ prefix: PREFIX, cursor });
+    for (const key of page.keys) versions.push({ key: key.name, meta: key.metadata ?? null });
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+  return versions;
+}
+
+/** Newest snapshot; falls back to older ones and then to the pre-versioning key. */
 export async function loadState(env: Env): Promise<AppState> {
-  const raw = await env.STATE.get<AppState>(KEY, "json");
-  return raw ?? structuredClone(EMPTY_STATE);
+  const versions = await listStateVersions(env);
+  for (let i = versions.length - 1; i >= 0; i--) {
+    const raw = await env.STATE.get<AppState>(versions[i].key, "json");
+    if (raw) return raw;
+  }
+  const legacy = await env.STATE.get<AppState>(LEGACY_KEY, "json");
+  return legacy ?? structuredClone(EMPTY_STATE);
 }
 
 export function isActiveWeek(week: WeekActivity): boolean {
@@ -49,6 +90,29 @@ export function advanceState(state: AppState, week: WeekActivity, newlyUnlocked:
   };
 }
 
-export async function saveState(env: Env, state: AppState): Promise<void> {
-  await env.STATE.put(KEY, JSON.stringify(state));
+/** Appends a snapshot, prunes the oldest beyond the limit, returns the new key. */
+export async function saveState(env: Env, state: AppState, savedAt: Date = new Date()): Promise<string> {
+  const iso = savedAt.toISOString();
+  const key = `${PREFIX}${iso}`;
+  const metadata: StateMeta = {
+    savedAt: iso,
+    until: state.lastRunUntil,
+    reportCount: state.reportCount,
+    streak: state.streak,
+  };
+  await env.STATE.put(key, JSON.stringify(state), { metadata });
+
+  const versions = await listStateVersions(env);
+  for (const stale of versions.slice(0, Math.max(0, versions.length - HISTORY_LIMIT))) {
+    await env.STATE.delete(stale.key);
+  }
+  return key;
+}
+
+/** Drops the newest snapshot — the undo for a manual run. Returns the key or null. */
+export async function deleteLatestState(env: Env): Promise<string | null> {
+  const latest = (await listStateVersions(env)).at(-1);
+  if (!latest) return null;
+  await env.STATE.delete(latest.key);
+  return latest.key;
 }

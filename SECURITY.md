@@ -21,7 +21,7 @@ Credentials it is given (all as Workers secrets, never as vars):
 | `GITHUB_REPORTS_TOKEN` | Write access to the reports repository only |
 | `OPENAI_API_KEY` / `VERCEL_AI_GATEWAY_API_KEY` | LLM spend on your account |
 | `TELEGRAM_BOT_TOKEN` | Control of the notification bot |
-| `RUN_SECRET` | Ability to trigger extra runs (cost, no data exfiltration) |
+| `RUN_SECRET` | Ability to trigger extra runs (cost, no data exfiltration), to list the state history (counters only) and to delete its newest snapshot |
 | `DEV_PROFILE` | Personal data in the prompt (stack, seniority, region) |
 
 Use fine-grained PATs and split them as the README describes: the scanning token needs
@@ -42,8 +42,11 @@ repository.
 - **Errors are not echoed outward.** Failure details go to Workers logs (which require
   Cloudflare account access); Telegram gets a fixed sanitized notice. LLM debugging logs
   record the *shape* of the answer, not its content.
-- **`/run` is authenticated** with a constant-time comparison of a bearer token against
-  `RUN_SECRET`, and returns `403` for anything else. Every other path is `404`.
+- **Every endpoint is authenticated** with a constant-time comparison of a bearer token
+  against `RUN_SECRET`, and returns `403` for anything else. Every other path is `404`.
+  `GET /state` exposes snapshot keys and counters (report count, streak, period end) —
+  no repository names, titles or links; `DELETE /state/latest` removes one snapshot, and
+  the run history is capped at 52 snapshots, so the worst case is a distorted streak.
 - **`PRIVATE_REPOS` is a privacy control, not a security boundary.** With `full`, reports
   contain private repository names and commit titles — the reports repository must then be
   private. `redact` is the default for that reason.

@@ -15,6 +15,8 @@ export interface RunResult {
   issues: number;
   activeRepos: number;
   newAchievements: string[];
+  /** KV key of the snapshot this run appended — delete it to undo the run. */
+  stateKey: string;
 }
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -45,9 +47,10 @@ export async function runWeekly(env: Env, until: Date): Promise<RunResult> {
   const reportUrl = await commitFile(env, config, reportPath, markdown, `report: week of ${day}`);
 
   await notifyTelegram(env, config, llm.telegramMessage, achievements, reportUrl);
-  await saveState(env, advanceState(state, week, achievements.map((a) => a.id)));
+  const stateKey = await saveState(env, advanceState(state, week, achievements.map((a) => a.id)));
 
   return {
+    stateKey,
     reportPath,
     reportUrl,
     commits: week.totalCommits,

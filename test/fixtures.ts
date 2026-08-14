@@ -89,6 +89,40 @@ export function makeWeek(overrides: Partial<WeekActivity> = {}): WeekActivity {
   };
 }
 
+interface FakeKvEntry {
+  value: string;
+  metadata: unknown;
+}
+
+/** In-memory stand-in for the STATE binding: enough of the KV API for state.ts. */
+export function makeKvEnv(pageSize = 1000): Env & { kv: Map<string, FakeKvEntry> } {
+  const kv = new Map<string, FakeKvEntry>();
+  const STATE = {
+    async get(key: string, _type?: string) {
+      const entry = kv.get(key);
+      return entry ? JSON.parse(entry.value) : null;
+    },
+    async put(key: string, value: string, options?: { metadata?: unknown }) {
+      kv.set(key, { value, metadata: options?.metadata ?? null });
+    },
+    async delete(key: string) {
+      kv.delete(key);
+    },
+    async list({ prefix = "", cursor }: { prefix?: string; cursor?: string } = {}) {
+      const names = [...kv.keys()].filter((k) => k.startsWith(prefix)).sort();
+      const start = cursor ? names.indexOf(cursor) : 0;
+      const page = names.slice(start, start + pageSize);
+      const next = names[start + pageSize];
+      return {
+        keys: page.map((name) => ({ name, metadata: kv.get(name)?.metadata ?? undefined })),
+        list_complete: next === undefined,
+        cursor: next,
+      };
+    },
+  };
+  return { STATE, kv } as unknown as Env & { kv: Map<string, FakeKvEntry> };
+}
+
 export function makeState(overrides: Partial<AppState> = {}): AppState {
   return {
     reportCount: 0,

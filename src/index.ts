@@ -1,5 +1,6 @@
 import { loadConfig } from "./config";
 import { runWeekly } from "./run";
+import { deleteLatestState, listStateVersions } from "./state";
 import { notifyTelegramError } from "./telegram";
 import { zonedTimeToUtc } from "./time";
 
@@ -10,6 +11,12 @@ async function keyMatches(provided: string, secret: string): Promise<boolean> {
     crypto.subtle.digest("SHA-256", enc.encode(secret)),
   ]);
   return crypto.subtle.timingSafeEqual(a, b);
+}
+
+async function authorized(request: Request, env: Env): Promise<boolean> {
+  const auth = request.headers.get("Authorization") ?? "";
+  const key = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : "";
+  return Boolean(env.RUN_SECRET) && (await keyMatches(key, env.RUN_SECRET));
 }
 
 // The full error goes to the Workers logs only (private, requires Cloudflare account access).
@@ -36,13 +43,28 @@ export default {
 
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    if (url.pathname !== "/run") {
+    const route = `${request.method} ${url.pathname}`;
+    if (!["POST /run", "GET /run", "GET /state", "DELETE /state/latest"].includes(route)) {
       return new Response("Not found", { status: 404 });
     }
-    const auth = request.headers.get("Authorization") ?? "";
-    const key = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : "";
-    if (!env.RUN_SECRET || !(await keyMatches(key, env.RUN_SECRET))) {
+    if (!(await authorized(request, env))) {
       return new Response("Forbidden", { status: 403 });
+    }
+
+    // History of state snapshots, oldest first. The last entry is the live state —
+    // the one a manual run has just appended.
+    if (route === "GET /state") {
+      const versions = await listStateVersions(env);
+      return Response.json({ current: versions.at(-1)?.key ?? null, versions });
+    }
+
+    // Undo the newest run: the previous snapshot becomes current again, so the next
+    // run rebuilds the week on top of it instead of double-counting.
+    if (route === "DELETE /state/latest") {
+      const deleted = await deleteLatestState(env);
+      return deleted
+        ? Response.json({ deleted })
+        : Response.json({ error: "no state snapshots" }, { status: 404 });
     }
 
     // ?date=YYYY-MM-DD — run for the week ending on that date (for testing).
