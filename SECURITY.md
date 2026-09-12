@@ -30,15 +30,23 @@ repository.
 
 ## Design decisions that are part of the threat model
 
-- **Nothing but metadata reaches the LLM.** `src/sanitize.ts` is a single exit point that
-  builds the payload as an explicit projection over an allowlist, then re-validates every
-  key of the finished object recursively and throws on anything unknown. File contents,
-  diffs and patches cannot reach the model by construction; commit timestamps don't either
-  (only minutes between commits). Redacted private repositories contribute line counters
-  and those time windows per commit, never names or text. Changes to that file deserve
-  extra scrutiny.
-- **Prompt injection is accepted, not solved.** Commit messages, PR and issue titles
-  written by other people end up in the prompt. The report model has no tools and no write
+- **Nothing but metadata and human-written text reaches the LLM.** `src/sanitize.ts` is a
+  single exit point that builds the payload as an explicit projection over an allowlist,
+  then re-validates every key of the finished object recursively and throws on anything
+  unknown. File contents, diffs and patches cannot reach the model by construction;
+  commit timestamps don't either (only minutes between commits). Redacted private
+  repositories contribute line counters and those time windows per commit, never names
+  or text.
+- **Free text is secret-scrubbed, fail-closed.** Full commit messages and PR/issue titles
+  and descriptions pass through `src/secrets.ts` (known token formats, private key blocks,
+  URL credentials, long high-entropy runs → `[secret]`) and are clipped to 1000
+  characters; every string of the finished payload is then re-scanned, and a secret-like
+  leftover blocks the LLM call. This is a heuristic for credential-shaped strings, not a
+  privacy filter: anything else people write in commits and descriptions (internal names,
+  snippets, links) goes to the LLM for every repository that is not redacted. Changes to
+  `src/sanitize.ts` and `src/secrets.ts` deserve extra scrutiny.
+- **Prompt injection is accepted, not solved.** Commit messages, PR and issue titles and
+  descriptions written by other people end up in the prompt. The report model has no tools and no write
   access, so the worst case is misleading wording in your own report. Do not extend the
   model's capabilities without revisiting this.
 - **The market-rate lookup is the one call with a tool, and it is boxed in.** Only with
@@ -65,7 +73,9 @@ repository.
   the run history is capped at 52 snapshots, so the worst case is a distorted streak.
 - **`PRIVATE_REPOS` is a privacy control, not a security boundary.** With `full`, reports
   contain private repository names and commit titles — the reports repository must then be
-  private. `redact` is the default for that reason.
+  private — and the LLM provider receives their full commit messages and PR/issue
+  descriptions. `redact` is the default for that reason: private repositories then
+  contribute counters only.
 - **CI cannot see or change vars/secrets, structurally.** `.github/workflows/deploy.yml` deploys
   with `wrangler.ci.jsonc`, which carries no `vars` block and sets `keep_vars: true` — Cloudflare
   then leaves whatever is already live untouched. Vars and secrets only ever change from your own
