@@ -1,4 +1,5 @@
 import type { Config } from "./config";
+import { resolvePrivateRepos } from "./repo-visibility";
 import type { CommitInfo, IssueInfo, PrInfo, RepoActivity, WeekActivity } from "./types";
 
 const API = "https://api.github.com";
@@ -45,6 +46,32 @@ interface RestRepo {
   html_url: string;
   pushed_at: string;
   fork: boolean;
+}
+
+const MAX_REPO_PAGES = 5; // 500 repos; anything beyond is resolved per repo (repo-visibility.ts)
+
+function nextLink(link: string | null): string | null {
+  return link?.match(/<([^>]+)>;\s*rel="next"/)?.[1] ?? null;
+}
+
+/**
+ * The account's repositories, most recently pushed first, following the Link header.
+ * Only the first page is mandatory: a later page that fails ends the list early, and the
+ * repos it would have carried fall back to per-repo lookups.
+ */
+async function fetchAllRepos(env: Env): Promise<RestRepo[]> {
+  const repos: RestRepo[] = [];
+  let url: string | null = `${API}/user/repos?per_page=100&sort=pushed&direction=desc`;
+  for (let page = 0; url && page < MAX_REPO_PAGES; page++) {
+    const res: Response = await fetch(url, { headers: headers(env.GITHUB_TOKEN) });
+    if (!res.ok) {
+      if (page === 0) throw new Error(`GitHub /user/repos -> ${res.status}: ${await res.text()}`);
+      break;
+    }
+    repos.push(...((await res.json()) as RestRepo[]));
+    url = nextLink(res.headers.get("Link"));
+  }
+  return repos;
 }
 
 export interface HistoryNode {
@@ -166,16 +193,21 @@ export async function collectWeekActivity(
   const sinceIso = since.toISOString();
   const sinceDay = sinceIso.slice(0, 10);
 
-  const allRepos = await rest<RestRepo[]>(env, "/user/repos?per_page=100&sort=pushed&direction=desc");
+  const allRepos = await fetchAllRepos(env);
   const active = allRepos.filter((r) => r.pushed_at >= sinceIso).slice(0, config.maxRepos);
-  // Search results carry no visibility flag; the account's repo list is the source of truth.
-  const privateNames = new Set(allRepos.filter((r) => r.private).map((r) => r.full_name));
 
   const [commitsByRepo, prItems, issueItems] = await Promise.all([
     fetchCommits(env, active, sinceIso),
     searchIssues(env, `author:${config.githubUser} type:pr updated:>=${sinceDay}`),
     searchIssues(env, `author:${config.githubUser} type:issue updated:>=${sinceDay}`),
   ]);
+
+  // Search results carry no visibility flag: the account's repo list first, then fail-closed lookups.
+  const privateNames = await resolvePrivateRepos(
+    new Map(allRepos.map((r) => [r.full_name, r.private])),
+    [...prItems, ...issueItems].map((i) => repoFromApiUrl(i.repository_url)),
+    (fullName) => rest<{ private?: boolean }>(env, `/repos/${fullName}`),
+  );
 
   const withCommits = active.filter((r) => (commitsByRepo.get(r.full_name) ?? []).length > 0);
   const opsByRepo = new Map(
