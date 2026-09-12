@@ -70,9 +70,10 @@
     "ENABLE_SALARY_ESTIMATE": "false",
     // Upper bound on repositories inspected per run (GitHub API / subrequest budget)
     "MAX_REPOS": "15",
-    // "openai" — OpenAI directly; "vercel" — through the Vercel AI Gateway
+    // "openai" — OpenAI directly; "vercel" — through the Vercel AI Gateway;
+    // "openrouter" — through OpenRouter, always restricted to zero-data-retention endpoints
     "LLM_PROVIDER": "openai",
-    // Format depends on LLM_PROVIDER: "vercel" (Gateway) needs "provider/model",
+    // Format depends on LLM_PROVIDER: "vercel" and "openrouter" need "provider/model",
     // "openai" (direct API) takes the bare model name.
     "LLM_MODEL": "gpt-5.6-luna",
     // The Gateway exposes reasoning levels ("low"/"medium"/"high"/...), but a given model
@@ -88,6 +89,7 @@
       "GITHUB_REPORTS_TOKEN",
       "OPENAI_API_KEY",
       "VERCEL_AI_GATEWAY_API_KEY",
+      "OPENROUTER_API_KEY",
       "TELEGRAM_BOT_TOKEN",
       "TELEGRAM_CHAT_ID",
       "RUN_SECRET",

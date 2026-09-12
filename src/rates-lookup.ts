@@ -3,6 +3,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { generateText, type LanguageModel, Output, type ToolSet } from "ai";
 import { z } from "zod";
 import type { Config } from "./config";
+import { openRouterZdr } from "./openrouter";
 import { EXTRACT_INSTRUCTIONS, knowledgeInstructions, marketPrompt, searchInstructions } from "./rates-prompt";
 import type { RateSource } from "./types";
 
@@ -137,6 +138,16 @@ function providers(env: Env, config: Config): Providers {
       model: gateway(config.llm.model),
       // Executed by the Gateway itself, so it works with any model routed through it.
       searchTools: (country) => ({ perplexity_search: gateway.tools.perplexitySearch({ maxResults: 10, ...(country && { country }) }) }),
+    };
+  }
+  if (config.llm.provider === "openrouter") {
+    const { model, tools } = openRouterZdr(env, config);
+    return {
+      model,
+      // Executed by OpenRouter: the model's native search where it has one, Exa otherwise.
+      // Outside ZDR, but the queries are built from the extract only. No country option here,
+      // and no maxResults: provider v3.0.0 sends it outside the `parameters` object the API reads.
+      searchTools: () => ({ web_search: tools.webSearch({}) }),
     };
   }
   const openai = createOpenAI({ apiKey: env.OPENAI_API_KEY });

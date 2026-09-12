@@ -35,7 +35,7 @@ function searchResult(overrides: Record<string, unknown> = {}, output: Record<st
   } as never;
 }
 
-type CallOptions = { prompt?: string; instructions?: string; tools?: Record<string, unknown> };
+type CallOptions = { model?: unknown; prompt?: string; instructions?: string; tools?: Record<string, unknown> };
 const call = (i: number) => gen.mock.calls[i][0] as unknown as CallOptions;
 
 beforeEach(() => {
@@ -69,6 +69,17 @@ describe("lookupMarketRates", () => {
     );
     await lookupMarketRates(env, config({ LLM_PROVIDER: "vercel", LLM_MODEL: "openai/test-model" }));
     expect(Object.keys(call(1).tools ?? {})).toEqual(["perplexity_search"]);
+  });
+
+  it("uses OpenRouter's web search and ZDR-only endpoints with LLM_PROVIDER=openrouter", async () => {
+    gen.mockResolvedValueOnce({ output: extracted } as never).mockResolvedValueOnce(searchResult());
+    await lookupMarketRates(env, config({ LLM_PROVIDER: "openrouter", LLM_MODEL: "vendor/test-model" }));
+    expect(Object.keys(call(1).tools ?? {})).toEqual(["web_search"]);
+    expect(call(1).tools?.web_search).toMatchObject({ id: "openrouter.web_search" });
+    // Both calls, including the one that sees DEV_PROFILE, go to ZDR endpoints only.
+    for (const i of [0, 1]) {
+      expect(call(i).model).toMatchObject({ settings: { provider: { zdr: true, data_collection: "deny" } } });
+    }
   });
 
   it("keeps only cited sources the search actually returned", async () => {

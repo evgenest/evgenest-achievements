@@ -9,7 +9,7 @@ import { getMessages, isLang, type Lang, type Messages } from "./i18n";
  */
 export type PrivacyMode = "full" | "redact" | "skip";
 
-export type LlmProvider = "openai" | "vercel";
+export type LlmProvider = "openai" | "vercel" | "openrouter";
 
 /** Reasoning levels understood by the AI SDK; a model may collapse them to on/off. */
 const REASONING_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh", "provider-default"] as const;
@@ -66,6 +66,11 @@ function reasoningEffort(value: string | undefined): ReasoningEffort {
   return v && REASONING_LEVELS.includes(v) ? v : DEFAULTS.reasoningEffort;
 }
 
+function llmProvider(value: string | undefined): LlmProvider {
+  const v = value?.trim().toLowerCase();
+  return v === "vercel" || v === "openrouter" ? v : "openai";
+}
+
 function privacyMode(value: string | undefined): PrivacyMode {
   const v = value?.trim().toLowerCase();
   return v === "full" || v === "redact" || v === "skip" ? v : DEFAULTS.privacy;
@@ -90,7 +95,7 @@ export function loadConfig(env: Env): Config {
     privacy: privacyMode(env.PRIVATE_REPOS),
     maxRepos: int(env.MAX_REPOS, DEFAULTS.maxRepos),
     llm: {
-      provider: str(env.LLM_PROVIDER, "openai") === "vercel" ? "vercel" : "openai",
+      provider: llmProvider(env.LLM_PROVIDER),
       model: str(env.LLM_MODEL, DEFAULTS.model),
       reasoningEffort: reasoningEffort(env.LLM_REASONING_EFFORT),
     },

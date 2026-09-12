@@ -12,7 +12,7 @@ It was built as a personal "wall of fame" for a developer who tends to undervalu
 cron (weekly)
   └─ collect GitHub activity (REST + GraphQL)
        └─ apply privacy policy for private repos
-            ├─ sanitize → LLM (OpenAI or Vercel AI Gateway)
+            ├─ sanitize → LLM (OpenAI, Vercel AI Gateway or OpenRouter)
             ├─ market rates: KV cache, web search only when stale (optional)
             └─ focused hours + cost computed in code
                  └─ build markdown → commit to reports repo
@@ -22,8 +22,8 @@ cron (weekly)
 
 - **Cloudflare Worker** with a cron trigger, plus authenticated `/run` and `/state` endpoints for manual runs and rolling them back
 - **GitHub API**: REST (repo list, PR/issue search, committing the report) and GraphQL (commits with per-commit stats in a single request)
-- **LLM**: OpenAI Responses API directly, or the same models through the Vercel AI Gateway (`@ai-sdk/gateway` + `ai`) — switched with `LLM_PROVIDER`. Structured output either way
-- **Web search** (only for the optional salary estimate, only when cached rates are stale): a provider-executed search tool through the AI SDK — `openai.tools.webSearch()` from `@ai-sdk/openai` with `LLM_PROVIDER=openai`, the Gateway's `perplexitySearch` with `LLM_PROVIDER=vercel` (see [Focused hours and salary estimate](#focused-hours-and-salary-estimate))
+- **LLM**: OpenAI Responses API directly, the Vercel AI Gateway (`@ai-sdk/gateway` + `ai`), or OpenRouter restricted to zero-data-retention endpoints (`@openrouter/ai-sdk-provider` + `ai`) — switched with `LLM_PROVIDER`. Structured output in every case
+- **Web search** (only for the optional salary estimate, only when cached rates are stale): a provider-executed search tool through the AI SDK — `openai.tools.webSearch()` from `@ai-sdk/openai` with `LLM_PROVIDER=openai`, the Gateway's `perplexitySearch` with `LLM_PROVIDER=vercel`, OpenRouter's `web_search` server tool with `LLM_PROVIDER=openrouter` (see [Focused hours and salary estimate](#focused-hours-and-salary-estimate))
 - **Workers KV**: streak, all-time totals, unlocked achievements, previous-week snapshot, cached market rates — appended as a new snapshot per run, so a test run can be rolled back (see [State history](#state-history))
 - **Telegram Bot API**: outbound `sendMessage` only, no webhook
 - Every report ends with a `provider/model` signature line, so a report stays self-describing even after `LLM_PROVIDER`/`LLM_MODEL` change later
@@ -66,7 +66,9 @@ Commits are sent as one chronological list across all repositories: id, reposito
 
 The scrubber (`src/secrets.ts`) covers PEM private key blocks, `scheme://user:password@` credentials, JWTs, `sk-…` API keys, GitHub tokens (`ghp_`/`gho_`/`ghu_`/`ghs_`/`ghr_`/`github_pat_`), AWS access key IDs (`AKIA`/`ASIA`), Slack tokens (`xoxa-`/`xoxb-`/`xoxp-`/`xoxr-`/`xoxs-`), Telegram bot tokens, `Bearer <token>`, hex runs of 32+ characters (a 40-character git SHA is kept) and random-looking base64 runs of 32+ characters. It is a heuristic for credential-shaped strings, not a privacy filter.
 
-File contents, diffs and patches cannot get there by construction. Commit messages and descriptions are human-written, though, and may quote code, links or internal details on their own — for private repositories that is what `PRIVATE_REPOS=redact` is for. The markdown report still lists commit headlines only. The same payload and the same path are used for both LLM providers. The optional market-rate lookup is a separate call with its own, much smaller input — see below.
+File contents, diffs and patches cannot get there by construction. Commit messages and descriptions are human-written, though, and may quote code, links or internal details on their own — for private repositories that is what `PRIVATE_REPOS=redact` is for. The markdown report still lists commit headlines only. The same payload and the same path are used for every LLM provider. The optional market-rate lookup is a separate call with its own, much smaller input — see below.
+
+With `LLM_PROVIDER=openrouter` every model request — the weekly report and the market-rate calls — is additionally pinned to zero-data-retention endpoints (`provider.zdr`, `data_collection: "deny"`, `src/openrouter.ts`): the model provider keeps neither the prompt nor the completion and cannot train on them. This is hardcoded, not a setting — if no ZDR endpoint can serve the model with strict structured output, the request fails instead of falling back. ZDR does not extend to OpenRouter's web search tool: its queries reach the search engine under that engine's own policy, and they are built from the extracted role/seniority/stack/region only (see below). OpenRouter itself does not store prompts unless prompt logging is enabled in the account's privacy settings; keep it off.
 
 ## Focused hours and salary estimate
 
@@ -109,7 +111,7 @@ Only with `ENABLE_SALARY_ESTIMATE=true`. The amounts are arithmetic in code, nev
 The two rates are **cached in the KV state** (with region, source links, fetch date, currency and a SHA-256 of `DEV_PROFILE` — never the profile text) and reused, so weeks stay comparable. A new lookup happens only when there is no cache, it is older than 90 days, `DEV_PROFILE` changed (hash) or `CURRENCY` changed. A lookup is three steps:
 
 1. **Extract** — a tool-less call turns `DEV_PROFILE` into role, seniority, main stack, region and country code, and is told to drop names, employers, clients, contacts and income. This is the only call that sees the profile text.
-2. **Search** — a second call gets only that extract (plus currency and date) and a provider-executed web search tool, and returns both rates, a region label and 1-5 source links as structured output. It is told to prefer the most popular job sites and salary databases for the region and to put nothing but role/seniority/stack/region into search queries. With `LLM_PROVIDER=openai` the tool is OpenAI's web search; with `LLM_PROVIDER=vercel` it is Perplexity search executed by the AI Gateway (so it works with any model the Gateway routes to), filtered to the extracted country. Whatever the search provider receives is built from those extracted fields only. Links are kept only if the search actually returned them.
+2. **Search** — a second call gets only that extract (plus currency and date) and a provider-executed web search tool, and returns both rates, a region label and 1-5 source links as structured output. It is told to prefer the most popular job sites and salary databases for the region and to put nothing but role/seniority/stack/region into search queries. With `LLM_PROVIDER=openai` the tool is OpenAI's web search; with `LLM_PROVIDER=vercel` it is Perplexity search executed by the AI Gateway (so it works with any model the Gateway routes to), filtered to the extracted country; with `LLM_PROVIDER=openrouter` it is OpenRouter's `web_search` server tool (the model's native search where it has one, Exa otherwise; no country filter), which zero data retention does not cover. Whatever the search provider receives is built from those extracted fields only. Links are kept only if the search actually returned them.
 3. **Fallback** — if the search call fails or the model/tool doesn't support it, the same question is asked without tools (the model's own knowledge). Such rates carry no sources, say so in the report, and are cached for 7 days only, so a real search is retried soon.
 
 If every step fails, the previous (stale) rates are reused when they are in the same currency; otherwise the salary section is left out. A rates failure never fails the weekly run. The report's cost section lists the hours, both amounts, the rates used, the region, the fetch date and the source links.
@@ -147,8 +149,8 @@ and conservative defaults. Everything except the two identifiers has a working d
 | `PRIVATE_REPOS` | `redact` | `full` / `redact` / `skip` (see above) |
 | `ENABLE_SALARY_ESTIMATE` | `false` | Price the week's focused hours at market rates found by web search and cached for ~90 days (see [Salary](#salary)) |
 | `MAX_REPOS` | `15` | Upper bound on repositories inspected per run |
-| `LLM_PROVIDER` | `openai` | `openai` (direct) or `vercel` (AI Gateway) |
-| `LLM_MODEL` | `gpt-5.6-luna` | `provider/model` for the Gateway, a bare model name for OpenAI |
+| `LLM_PROVIDER` | `openai` | `openai` (direct), `vercel` (AI Gateway) or `openrouter` (zero data retention only) |
+| `LLM_MODEL` | `gpt-5.6-luna` | `provider/model` for the Gateway and OpenRouter, a bare model name for OpenAI |
 | `LLM_REASONING_EFFORT` | `medium` | `none`/`minimal`/`low`/`medium`/`high`/`xhigh`/`provider-default`; a model may collapse these to on/off |
 
 Secrets (`wrangler secret put <NAME>`, or `.dev.vars` locally — see `.dev.vars.example`):
@@ -159,6 +161,7 @@ Secrets (`wrangler secret put <NAME>`, or `.dev.vars` locally — see `.dev.vars
 | `GITHUB_REPORTS_TOKEN` | Fine-grained PAT: reports repository only, Contents read/write |
 | `OPENAI_API_KEY` | Needed only with `LLM_PROVIDER=openai` |
 | `VERCEL_AI_GATEWAY_API_KEY` | Needed only with `LLM_PROVIDER=vercel` |
+| `OPENROUTER_API_KEY` | Needed only with `LLM_PROVIDER=openrouter` |
 | `TELEGRAM_BOT_TOKEN` | Bot token from @BotFather |
 | `TELEGRAM_CHAT_ID` | Your chat with the bot (send it `/start`, read the id from `getUpdates`) |
 | `RUN_SECRET` | Any string; the bearer token for manual runs |
