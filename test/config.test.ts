@@ -37,8 +37,9 @@ describe("loadConfig", () => {
     expect(makeConfig({ REPORTS_DIR: "/weekly/" }).reportsDir).toBe("weekly");
   });
 
-  it("only accepts vercel as an alternative provider", () => {
+  it("only accepts vercel and openrouter as alternative providers", () => {
     expect(makeConfig({ LLM_PROVIDER: "vercel" }).llm.provider).toBe("vercel");
+    expect(makeConfig({ LLM_PROVIDER: "openrouter" }).llm.provider).toBe("openrouter");
     expect(makeConfig({ LLM_PROVIDER: "anything-else" }).llm.provider).toBe("openai");
   });
 });

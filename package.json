@@ -31,6 +31,7 @@
   "dependencies": {
     "@ai-sdk/gateway": "^4.0.80",
     "@ai-sdk/openai": "^4.0.66",
+    "@openrouter/ai-sdk-provider": "^3.0.0",
     "ai": "^7.0.99",
     "zod": "^4.4.3"
   }

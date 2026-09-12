@@ -1,8 +1,9 @@
 import { createGateway } from "@ai-sdk/gateway";
 import { generateText, NoObjectGeneratedError, Output } from "ai";
 import { z } from "zod";
-import type { Config } from "./config";
+import type { Config, LlmProvider } from "./config";
 import type { TimelineCommit } from "./hours";
+import { openRouterZdr } from "./openrouter";
 import { buildLlmPayload } from "./sanitize";
 import type { AppState, LlmResult, WeekActivity } from "./types";
 
@@ -98,6 +99,10 @@ export function normalizeLlmAnswer(raw: unknown): unknown {
   return normalizeCommitMinutes(normalizeProjectSummaries(raw));
 }
 
+function activityPrompt(input: unknown): string {
+  return `Weekly activity data (JSON):\n${JSON.stringify(input)}`;
+}
+
 function systemPrompt(config: Config): string {
   return config.messages.prompt({
     devProfile: config.devProfile,
@@ -116,7 +121,7 @@ async function callOpenAI(env: Env, config: Config, schema: ResultSchema, instru
       model: config.llm.model,
       reasoning: { effort: config.llm.reasoningEffort },
       instructions,
-      input: `Weekly activity data (JSON):\n${JSON.stringify(input)}`,
+      input: activityPrompt(input),
       text: {
         format: {
           type: "json_schema",
@@ -155,6 +160,28 @@ async function callOpenAI(env: Env, config: Config, schema: ResultSchema, instru
   throw new Error(`OpenAI: response did not match schema (${result ? "validation failed" : "invalid JSON"})`);
 }
 
+// When the SDK rejects the model's structured output, the raw text often still holds a
+// valid (or reshapeable) object — recover it before giving up. Rethrows otherwise.
+function recoverSchemaMiss(err: unknown, provider: LlmProvider, config: Config, schema: ResultSchema): LlmResult {
+  if (NoObjectGeneratedError.isInstance(err) && err.text) {
+    const parsed = safeJsonParse(err.text);
+    const recovered = parsed !== undefined ? schema.safeParse(normalizeLlmAnswer(parsed)) : undefined;
+    if (recovered?.success) return recovered.data;
+
+    console.error(
+      JSON.stringify({
+        event: "llm_schema_mismatch",
+        provider,
+        model: config.llm.model,
+        output: describeLlmOutput(err.text, parsed),
+        cause: String(err.cause),
+        finishReason: err.finishReason,
+      }),
+    );
+  }
+  throw err;
+}
+
 // Vercel AI Gateway: a single billing and routing point to the same models,
 // for when paying the provider directly is inconvenient.
 async function callVercel(env: Env, config: Config, schema: ResultSchema, instructions: string, input: unknown): Promise<LlmResult> {
@@ -163,29 +190,29 @@ async function callVercel(env: Env, config: Config, schema: ResultSchema, instru
     const { output } = await generateText({
       model: gateway(config.llm.model),
       instructions,
-      prompt: `Weekly activity data (JSON):\n${JSON.stringify(input)}`,
+      prompt: activityPrompt(input),
       reasoning: config.llm.reasoningEffort,
       output: Output.object({ schema }),
     });
     return output;
   } catch (err) {
-    if (NoObjectGeneratedError.isInstance(err) && err.text) {
-      const parsed = safeJsonParse(err.text);
-      const recovered = parsed !== undefined ? schema.safeParse(normalizeLlmAnswer(parsed)) : undefined;
-      if (recovered?.success) return recovered.data;
+    return recoverSchemaMiss(err, "vercel", config, schema);
+  }
+}
 
-      console.error(
-        JSON.stringify({
-          event: "llm_schema_mismatch",
-          provider: "vercel",
-          model: config.llm.model,
-          output: describeLlmOutput(err.text, parsed),
-          cause: String(err.cause),
-          finishReason: err.finishReason,
-        }),
-      );
-    }
-    throw err;
+// OpenRouter, locked to zero-data-retention endpoints (see openrouter.ts).
+async function callOpenRouter(env: Env, config: Config, schema: ResultSchema, instructions: string, input: unknown): Promise<LlmResult> {
+  const { model } = openRouterZdr(env, config);
+  try {
+    const { output } = await generateText({
+      model,
+      instructions,
+      prompt: activityPrompt(input),
+      output: Output.object({ schema }),
+    });
+    return output;
+  } catch (err) {
+    return recoverSchemaMiss(err, "openrouter", config, schema);
   }
 }
 
@@ -202,7 +229,12 @@ export async function generateInsights(
   const instructions = systemPrompt(config);
   const schema = RESULT_SCHEMA;
 
-  return config.llm.provider === "vercel"
-    ? callVercel(env, config, schema, instructions, input)
-    : callOpenAI(env, config, schema, instructions, input);
+  switch (config.llm.provider) {
+    case "vercel":
+      return callVercel(env, config, schema, instructions, input);
+    case "openrouter":
+      return callOpenRouter(env, config, schema, instructions, input);
+    case "openai":
+      return callOpenAI(env, config, schema, instructions, input);
+  }
 }
