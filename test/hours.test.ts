@@ -147,6 +147,32 @@ describe("resolveHours", () => {
     expect(r.capped).toBe(true);
   });
 
+  it("matches the worked example in the README", () => {
+    const example = makeWeek({
+      repos: [
+        makeRepo({
+          fullName: "octocat/app",
+          commits: [
+            makeCommit({ date: at("10:00"), additions: 200, deletions: 20 }),
+            makeCommit({ date: at("13:10"), additions: 5, deletions: 1 }),
+            makeCommit({ date: at("19:00"), additions: 400, deletions: 50 }),
+          ],
+        }),
+        makeRepo({ fullName: "octocat/lib", commits: [makeCommit({ date: at("10:40"), additions: 15, deletions: 3 })] }),
+      ],
+    });
+    const tl = buildCommitTimeline(example);
+    expect(tl.map((t) => [t.repo, t.windowMinutes, t.startsSession])).toEqual([
+      ["octocat/app", 120, true],
+      ["octocat/lib", 40, false],
+      ["octocat/app", 150, false],
+      ["octocat/app", 120, true],
+    ]);
+    const r = resolveHours(tl, [90, 25, 10, 180].map((minutes, id) => ({ id, minutes })));
+    expect(r.perCommit).toEqual([90, 25, 10, 120]);
+    expect(r.hours).toBe(4.1);
+  });
+
   it("is zero for a week without commits", () => {
     expect(resolveHours(buildCommitTimeline(makeWeek({ repos: [] })), []).hours).toBe(0);
   });

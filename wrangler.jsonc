@@ -59,12 +59,14 @@
     "REPORT_TITLE": "Weekly Achievements",
     // IANA time zone used for dates in the report and for time-based achievements
     "TIMEZONE": "UTC",
-    // ISO 4217 code used to render the salary estimate
+    // ISO 4217 code used to render the salary estimate (changing it triggers a new rates lookup)
     "CURRENCY": "EUR",
     // "full" — private repos appear as-is; "redact" — counted, but names, commit
     // messages, titles and links are stripped; "skip" — excluded entirely.
     "PRIVATE_REPOS": "redact",
-    // Ask the model what the week would be worth on the market. Requires DEV_PROFILE.
+    // Price the week's focused hours at market rates. Rates are found by the LLM's web search
+    // (queries carry only role/stack/seniority/region extracted from DEV_PROFILE, never the
+    // profile text) and cached in the KV state for ~90 days. Requires DEV_PROFILE.
     "ENABLE_SALARY_ESTIMATE": "false",
     // Upper bound on repositories inspected per run (GitHub API / subrequest budget)
     "MAX_REPOS": "15",
