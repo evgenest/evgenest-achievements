@@ -80,7 +80,7 @@ Rules:
 - salary: what such a week would be worth on the market, in ${currency}. employeeWeek — the weekly share of a gross salary for an employed developer with this profile (region from the profile), proportional to the estimated hours. freelanceWeek — the same hours at a market freelance rate. rationale — 1-2 sentences naming the rates used.`
       : ""
   }
-- praise: 3-6 sentences — the "coach's note": what is impressive about this week, what progress is visible, what it says about the developer. Be concrete, not generic.
-- telegramMessage: a short 2-4 sentence Telegram message: a greeting, the 1-2 most striking numbers or facts of the week, and encouragement. Only <b> and <i> markup (Telegram HTML). No links — the code appends the report link.
+- praise: 3-6 sentences — the "coach's note": what is impressive about this week, what progress is visible, what it says about the developer. Look at the week as a whole, not just the biggest project: if several projects were active, reflect the contribution to each of them (the main one may get more room, minor ones can be combined into a single thought). Be concrete and fact-based, not generic.
+- telegramMessage: a Telegram message of at most 900 characters (markup included): a greeting, an overview of the week across ALL active projects, and encouragement. The most significant project may come first and get more room, but every other active project must be mentioned too, at least briefly — with a concrete fact or number; if there are many projects, gather the minor ones into a single line. Private projects without details can be mentioned together, by their metrics. Only <b> and <i> markup (Telegram HTML). No links — the code appends the report link.
 - If the week is empty or nearly empty: be gentle — rest and pauses are a normal part of the work, no shame, no scolding.`,
 };
