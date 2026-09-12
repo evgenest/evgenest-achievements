@@ -47,12 +47,30 @@ interface RestRepo {
   fork: boolean;
 }
 
-interface HistoryNode {
+export interface HistoryNode {
   messageHeadline: string;
   committedDate: string;
   additions: number;
   deletions: number;
   url: string;
+  parents: { totalCount: number };
+}
+
+/**
+ * Merge commits (more than one parent) are dropped entirely: GitHub reports their
+ * additions/deletions as the diff against the first parent, i.e. the same lines the
+ * merged branch's own commits already carry — counting them would double every total.
+ */
+export function commitsFromHistory(nodes: HistoryNode[]): CommitInfo[] {
+  return nodes
+    .filter((n) => (n.parents?.totalCount ?? 1) <= 1)
+    .map((n) => ({
+      message: n.messageHeadline,
+      date: n.committedDate,
+      additions: n.additions,
+      deletions: n.deletions,
+      url: n.url,
+    }));
 }
 
 /** Default-branch commits of every active repo in a single GraphQL request (aliases). */
@@ -65,7 +83,7 @@ async function fetchCommits(env: Env, repos: RestRepo[], since: string): Promise
     return `r${i}: repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) {
       defaultBranchRef { target { ... on Commit {
         history(since: $since, author: { id: $authorId }, first: 100) {
-          nodes { messageHeadline committedDate additions deletions url }
+          nodes { messageHeadline committedDate additions deletions url parents { totalCount } }
         }
       } } }
     }`;
@@ -80,16 +98,7 @@ async function fetchCommits(env: Env, repos: RestRepo[], since: string): Promise
   repos.forEach((r, i) => {
     const nodes = (data[`r${i}`]?.defaultBranchRef?.target as { history?: { nodes: HistoryNode[] } } | null | undefined)
       ?.history?.nodes ?? [];
-    result.set(
-      r.full_name,
-      nodes.map((n) => ({
-        message: n.messageHeadline,
-        date: n.committedDate,
-        additions: n.additions,
-        deletions: n.deletions,
-        url: n.url,
-      })),
-    );
+    result.set(r.full_name, commitsFromHistory(nodes));
   });
   return result;
 }
