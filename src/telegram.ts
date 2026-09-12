@@ -26,6 +26,23 @@ export async function notifyTelegramError(env: Env): Promise<void> {
   }
 }
 
+/**
+ * Hard cap on the LLM-written part. Telegram rejects messages over 4096 characters; the
+ * prompt asks for ~900, this only guards against a runaway answer and leaves room for the
+ * achievements line and the report link appended below.
+ */
+export const MAX_LLM_MESSAGE = 3000;
+
+export function clipLlmMessage(text: string, max = MAX_LLM_MESSAGE): string {
+  if (text.length <= max) return text;
+  // Cutting through HTML could leave a tag unclosed — an overlong message loses its markup
+  const plain = text.replace(/<[^>]+>/g, "");
+  if (plain.length <= max) return plain;
+  const cut = plain.slice(0, max - 1);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > max * 0.8 ? cut.slice(0, space) : cut).trimEnd()}…`;
+}
+
 export async function notifyTelegram(
   env: Env,
   config: Config,
@@ -34,7 +51,7 @@ export async function notifyTelegram(
   reportUrl: string,
 ): Promise<void> {
   const m = config.messages.telegram;
-  const parts = [llmMessage];
+  const parts = [clipLlmMessage(llmMessage)];
   if (achievements.length > 0) {
     parts.push(m.newAchievements(achievements.map((a) => `<b>${a.title}</b>`).join(", ")));
   }
