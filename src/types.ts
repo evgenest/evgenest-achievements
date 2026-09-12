@@ -4,6 +4,8 @@ export interface CommitInfo {
   additions: number;
   deletions: number;
   url: string;
+  /** ISO. When the change was written — survives rebases, unlike `date` (committer date). */
+  authoredDate?: string;
 }
 
 export interface RepoActivity {
@@ -86,9 +88,15 @@ export interface SalaryEstimate {
   rationale: string;
 }
 
+/** The model's per-commit answer; `id` refers to the commit's position in the timeline. */
+export interface CommitEstimate {
+  id: number;
+  minutes: number;
+}
+
 export interface LlmResult {
   projectSummaries: { repo: string; summary: string }[];
-  hoursEstimate: number;
+  commitMinutes: CommitEstimate[];
   /** Present only when ENABLE_SALARY_ESTIMATE is on. */
   salary?: SalaryEstimate;
   praise: string;

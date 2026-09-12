@@ -54,6 +54,7 @@ export interface HistoryNode {
   deletions: number;
   url: string;
   parents: { totalCount: number };
+  authoredDate: string;
 }
 
 /**
@@ -70,6 +71,7 @@ export function commitsFromHistory(nodes: HistoryNode[]): CommitInfo[] {
       additions: n.additions,
       deletions: n.deletions,
       url: n.url,
+      authoredDate: n.authoredDate,
     }));
 }
 
@@ -83,7 +85,7 @@ async function fetchCommits(env: Env, repos: RestRepo[], since: string): Promise
     return `r${i}: repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) {
       defaultBranchRef { target { ... on Commit {
         history(since: $since, author: { id: $authorId }, first: 100) {
-          nodes { messageHeadline committedDate additions deletions url parents { totalCount } }
+          nodes { messageHeadline committedDate additions deletions url parents { totalCount } authoredDate }
         }
       } } }
     }`;

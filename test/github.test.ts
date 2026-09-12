@@ -9,6 +9,7 @@ const node = (overrides: Partial<HistoryNode> = {}): HistoryNode => ({
   deletions: 1,
   url: "https://github.com/octocat/app/commit/a",
   parents: { totalCount: 1 },
+  authoredDate: "2026-08-05T09:30:00Z",
   ...overrides,
 });
 
@@ -24,6 +25,13 @@ describe("commitsFromHistory", () => {
 
   it("keeps root commits (no parents) and squash merges (one parent)", () => {
     expect(commitsFromHistory([node({ parents: { totalCount: 0 } }), node()])).toHaveLength(2);
+  });
+
+  it("carries the author date next to the committer date", () => {
+    expect(commitsFromHistory([node()])[0]).toMatchObject({
+      date: "2026-08-05T10:00:00Z",
+      authoredDate: "2026-08-05T09:30:00Z",
+    });
   });
 });
 
