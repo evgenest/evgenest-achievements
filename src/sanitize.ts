@@ -1,4 +1,5 @@
 import { buildCommitTimeline, type TimelineCommit } from "./hours";
+import { assertNoSecrets, scrubSecrets } from "./secrets";
 import type { AppState, WeekActivity } from "./types";
 
 /**
@@ -6,21 +7,34 @@ import type { AppState, WeekActivity } from "./types";
  *
  * Guarantees:
  * 1. The payload is an explicit projection — only the primitives listed below
- *    (commit headlines, PR/issue titles, counters, period dates, minutes between
- *    commits, languages). Source code, diffs, patches, file contents, URLs and commit
- *    timestamps cannot reach it by construction.
+ *    (full commit messages, PR/issue titles and descriptions, counters, period dates,
+ *    minutes between commits, languages). File contents, diffs, patches and URL fields
+ *    are never fetched or projected, commit timestamps are never projected;
+ *    human-written text may still quote code or links on its own.
  * 2. assertSanitized() walks the finished payload and throws on any key outside
  *    the allowlist (fail-closed): if someone extends the activity types, the LLM
  *    call breaks instead of silently leaking new fields.
- * 3. Repositories redacted by the privacy policy (see privacy.ts) contribute
- *    counters and per-commit timing only — their names, commit messages and titles
- *    never get here.
+ * 3. Every free-text field is secret-scrubbed and clipped (text()); assertNoSecrets()
+ *    then re-scans every string of the finished payload and throws if anything
+ *    secret-like is left (fail-closed, see secrets.ts).
+ * 4. Repositories redacted by the privacy policy (see privacy.ts) contribute
+ *    counters and per-commit timing only — their names, commit messages, titles and
+ *    descriptions never get here.
  */
 
-const MAX_TEXT = 200;
+const MAX_TEXT = 1000;
 
 function clip(s: string): string {
   return s.length > MAX_TEXT ? `${s.slice(0, MAX_TEXT)}…` : s;
+}
+
+/**
+ * Free text on its way to the LLM. HTML comments go first (PR templates are full of them,
+ * and they hide text from human readers); scrubbing runs on the whole text before
+ * clipping, so a secret straddling the cut cannot leak half-way.
+ */
+function text(s: string): string {
+  return clip(scrubSecrets(s.replace(/<!--[\s\S]*?-->/g, "").trim()));
 }
 
 export interface LlmPayload {
@@ -47,8 +61,8 @@ export interface LlmPayload {
       windowMinutes: number;
       startsSession: boolean;
     }[];
-    prs: { repo: string; title: string; state: string }[];
-    issues: { repo: string; title: string; state: string }[];
+    prs: { repo: string; title: string; body: string; state: string }[];
+    issues: { repo: string; title: string; body: string; state: string }[];
     totalCommits: number;
     totalAdditions: number;
     totalDeletions: number;
@@ -81,7 +95,7 @@ const ALLOWED_KEYS = new Set([
   "totalCommits", "totalAdditions", "totalDeletions",
   "repo", "language", "commitCount", "additions", "deletions",
   "ciSuccess", "ciFailure", "deployments",
-  "title", "state",
+  "title", "body", "state",
   "weekNumber", "streakWeeks", "bestStreak", "allTime", "lastWeek",
   "commits", "activeWeeks",
   "id", "message", "windowMinutes", "startsSession",
@@ -107,7 +121,7 @@ function commitEntry(t: TimelineCommit): LlmPayload["week"]["commits"][number] {
     id: t.id,
     repo: t.repo,
     // Redacted repos: timing and line counters only, no text.
-    message: t.redacted ? "" : clip(c.message),
+    message: t.redacted ? "" : text(c.message),
     additions: c.additions,
     deletions: c.deletions,
     windowMinutes: t.windowMinutes,
@@ -136,8 +150,12 @@ export function buildLlmPayload(
         deployments: r.deployments,
       })),
       commits: timeline.map(commitEntry),
-      prs: week.prs.filter((p) => !p.redacted).map((p) => ({ repo: p.repo, title: clip(p.title), state: p.state })),
-      issues: week.issues.filter((i) => !i.redacted).map((i) => ({ repo: i.repo, title: clip(i.title), state: i.state })),
+      prs: week.prs
+        .filter((p) => !p.redacted)
+        .map((p) => ({ repo: p.repo, title: text(p.title), body: text(p.body), state: p.state })),
+      issues: week.issues
+        .filter((i) => !i.redacted)
+        .map((i) => ({ repo: i.repo, title: text(i.title), body: text(i.body), state: i.state })),
       totalCommits: week.totalCommits,
       totalAdditions: week.totalAdditions,
       totalDeletions: week.totalDeletions,
@@ -151,5 +169,6 @@ export function buildLlmPayload(
     },
   };
   assertSanitized(payload);
+  assertNoSecrets(payload);
   return payload;
 }

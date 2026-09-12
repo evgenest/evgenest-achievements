@@ -95,7 +95,8 @@ export function buildReport({ config, week, state, newStreak, achievements, llm,
       lines.push(`<details><summary>${m.commitsDetails}</summary>`);
       lines.push("");
       for (const c of r.commits) {
-        lines.push(`- ${link(`\`${fmtDay(c.date)}\``, c.url)} ${c.message} (+${num(c.additions)}/−${num(c.deletions)})`);
+        // Headline only: a multi-line commit body would break the list.
+        lines.push(`- ${link(`\`${fmtDay(c.date)}\``, c.url)} ${c.headline} (+${num(c.additions)}/−${num(c.deletions)})`);
       }
       lines.push("");
       lines.push("</details>");

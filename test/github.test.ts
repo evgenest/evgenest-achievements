@@ -4,6 +4,7 @@ import { makeConfig } from "./fixtures";
 
 const node = (overrides: Partial<HistoryNode> = {}): HistoryNode => ({
   messageHeadline: "feat: thing",
+  message: "feat: thing\n\nWhy the thing was needed.",
   committedDate: "2026-08-05T10:00:00Z",
   additions: 10,
   deletions: 1,
@@ -20,7 +21,14 @@ describe("commitsFromHistory", () => {
       node({ messageHeadline: "Merge pull request #1", additions: 300, parents: { totalCount: 2 } }),
       node({ messageHeadline: "octopus", parents: { totalCount: 3 } }),
     ]);
-    expect(commits.map((c) => c.message)).toEqual(["feat: real work"]);
+    expect(commits.map((c) => c.headline)).toEqual(["feat: real work"]);
+  });
+
+  it("keeps the headline for the report and the full message for the LLM", () => {
+    expect(commitsFromHistory([node()])[0]).toMatchObject({
+      headline: "feat: thing",
+      message: "feat: thing\n\nWhy the thing was needed.",
+    });
   });
 
   it("keeps root commits (no parents) and squash merges (one parent)", () => {
@@ -79,6 +87,6 @@ describe("collectWeekActivity", () => {
     expect(week.totalCommits).toBe(2);
     expect(week.totalAdditions).toBe(120);
     expect(week.totalDeletions).toBe(5);
-    expect(week.repos[0].commits.every((c) => !c.message.startsWith("Merge"))).toBe(true);
+    expect(week.repos[0].commits.every((c) => !c.headline.startsWith("Merge"))).toBe(true);
   });
 });

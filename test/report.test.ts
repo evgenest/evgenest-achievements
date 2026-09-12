@@ -106,7 +106,7 @@ describe("buildReport", () => {
             isPrivate: true,
             redacted: true,
             url: "",
-            commits: [makeCommit({ message: "", url: "" })],
+            commits: [makeCommit({ headline: "", message: "", url: "" })],
           }),
         ],
       },
@@ -117,11 +117,29 @@ describe("buildReport", () => {
     expect(md).toContain("Private repository: details hidden");
   });
 
+  it("lists commit headlines only — bodies and descriptions stay out of the report", () => {
+    const md = render(
+      {},
+      {
+        repos: [
+          makeRepo({
+            commits: [makeCommit({ headline: "feat: add retries", message: "feat: add retries\n\nBody line one\nBody line two" })],
+          }),
+        ],
+        prs: [makePr({ body: "PR description text" })],
+        issues: [makeIssue({ body: "Issue description text" })],
+      },
+    );
+    expect(md).toMatch(/^- .*feat: add retries \(\+10\/−2\)$/m);
+    expect(md).not.toContain("Body line");
+    expect(md).not.toContain("description text");
+  });
+
   it("hides redacted pull requests and issues from the listings", () => {
     const md = render(
       {},
       {
-        prs: [makePr({ title: "", repo: "private-project-1", isPrivate: true, redacted: true })],
+        prs: [makePr({ title: "", body: "", repo: "private-project-1", isPrivate: true, redacted: true })],
         issues: [makeIssue()],
       },
     );
