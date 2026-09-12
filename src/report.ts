@@ -9,6 +9,8 @@ export interface ReportParams {
   newStreak: number;
   achievements: UnlockedAchievement[];
   llm: LlmResult;
+  /** Focused hours computed in code (see hours.ts). */
+  hours: number;
 }
 
 function delta(current: number, prev: number | undefined, num: (n: number) => string): string {
@@ -21,7 +23,7 @@ function link(text: string, url: string): string {
   return url ? `[${text}](${url})` : text;
 }
 
-export function buildReport({ config, week, state, newStreak, achievements, llm }: ReportParams): string {
+export function buildReport({ config, week, state, newStreak, achievements, llm, hours }: ReportParams): string {
   const m = config.messages.report;
   const fmtDay = (iso: string): string => formatDate(iso, config.messages.locale, config.timezone);
   const num = (n: number): string => n.toLocaleString(config.messages.locale);
@@ -124,7 +126,7 @@ export function buildReport({ config, week, state, newStreak, achievements, llm 
   if (config.salaryEstimate && llm.salary) {
     lines.push(`## ${m.sections.cost}`);
     lines.push("");
-    lines.push(m.cost.hours(num(Math.round(llm.hoursEstimate))));
+    lines.push(m.cost.hours(hours.toLocaleString(config.messages.locale, { maximumFractionDigits: 1 })));
     lines.push(m.cost.office(money(llm.salary.employeeWeek)));
     lines.push(m.cost.freelance(money(llm.salary.freelanceWeek)));
     lines.push("");

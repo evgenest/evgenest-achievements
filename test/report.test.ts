@@ -5,7 +5,7 @@ import { makeCommit, makeConfig, makeIssue, makePr, makeRepo, makeState, makeWee
 
 const llm: LlmResult = {
   projectSummaries: [{ repo: "octocat/public-repo", summary: "Shipped the thing." }],
-  hoursEstimate: 12.4,
+  commitMinutes: [],
   salary: { employeeWeek: 1234, freelanceWeek: 2345, rationale: "Rates used: ..." },
   praise: "Solid week.",
   telegramMessage: "Hi!",
@@ -19,6 +19,7 @@ const render = (configOverrides = {}, weekOverrides = {}, llmOverrides: Partial<
     newStreak: 2,
     achievements: [{ id: "marathon", title: "Marathoner", description: "10+ commits in a week" }],
     llm: { ...llm, ...llmOverrides },
+    hours: 12.4,
   });
 
 describe("buildReport", () => {
@@ -41,6 +42,10 @@ describe("buildReport", () => {
     expect(render({ CURRENCY: "USD" })).toMatch(/\$1[,. ]?234/);
   });
 
+  it("shows the hours computed in code, not a model guess", () => {
+    expect(render()).toContain("Estimated focused hours: **~12.4 h**");
+  });
+
   it("omits the salary block when the estimate is disabled", () => {
     const md = render({ ENABLE_SALARY_ESTIMATE: "false" }, {}, { salary: undefined });
     expect(md).not.toContain("What this week was worth");
@@ -54,6 +59,7 @@ describe("buildReport", () => {
       newStreak: 1,
       achievements: [],
       llm,
+      hours: 1,
     });
     expect(md).toMatch(/\| Commits \| 1 \| -4 \|/);
   });

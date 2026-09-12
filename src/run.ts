@@ -1,6 +1,7 @@
 import { detectAchievements } from "./achievements";
 import { loadConfig } from "./config";
 import { collectWeekActivity, commitFile } from "./github";
+import { buildCommitTimeline, resolveHours } from "./hours";
 import { generateInsights } from "./llm";
 import { applyPrivacy } from "./privacy";
 import { buildReport } from "./report";
@@ -39,9 +40,21 @@ export async function runWeekly(env: Env, until: Date): Promise<RunResult> {
 
   const newStreak = isActiveWeek(week) ? state.streak + 1 : 0;
   const achievements = detectAchievements(config, week, state, newStreak);
-  const llm = await generateInsights(env, config, week, state, newStreak);
+  const timeline = buildCommitTimeline(week);
+  const llm = await generateInsights(env, config, week, state, newStreak, timeline);
+  const hours = resolveHours(timeline, llm.commitMinutes);
+  console.log(
+    JSON.stringify({
+      event: "hours_estimate",
+      commits: timeline.length,
+      fromModel: hours.fromModel,
+      fallback: hours.fallback,
+      capped: hours.capped,
+      hours: hours.hours,
+    }),
+  );
 
-  const markdown = buildReport({ config, week, state, newStreak, achievements, llm });
+  const markdown = buildReport({ config, week, state, newStreak, achievements, llm, hours: hours.hours });
   const day = until.toISOString().slice(0, 10);
   const reportPath = `${config.reportsDir}/${day}.md`;
   const reportUrl = await commitFile(env, config, reportPath, markdown, `report: week of ${day}`);
