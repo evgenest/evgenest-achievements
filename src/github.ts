@@ -49,6 +49,7 @@ interface RestRepo {
 
 export interface HistoryNode {
   messageHeadline: string;
+  message: string;
   committedDate: string;
   additions: number;
   deletions: number;
@@ -66,7 +67,8 @@ export function commitsFromHistory(nodes: HistoryNode[]): CommitInfo[] {
   return nodes
     .filter((n) => (n.parents?.totalCount ?? 1) <= 1)
     .map((n) => ({
-      message: n.messageHeadline,
+      headline: n.messageHeadline,
+      message: n.message,
       date: n.committedDate,
       additions: n.additions,
       deletions: n.deletions,
@@ -85,7 +87,7 @@ async function fetchCommits(env: Env, repos: RestRepo[], since: string): Promise
     return `r${i}: repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) {
       defaultBranchRef { target { ... on Commit {
         history(since: $since, author: { id: $authorId }, first: 100) {
-          nodes { messageHeadline committedDate additions deletions url parents { totalCount } authoredDate }
+          nodes { messageHeadline message committedDate additions deletions url parents { totalCount } authoredDate }
         }
       } } }
     }`;
@@ -136,6 +138,7 @@ async function fetchOps(
 
 interface SearchItem {
   title: string;
+  body?: string | null;
   html_url: string;
   state: string;
   repository_url: string;
@@ -202,6 +205,7 @@ export async function collectWeekActivity(
     const repo = repoFromApiUrl(i.repository_url);
     return {
       title: i.title,
+      body: i.body ?? "",
       repo,
       isPrivate: privateNames.has(repo),
       redacted: false,
@@ -214,6 +218,7 @@ export async function collectWeekActivity(
     const repo = repoFromApiUrl(i.repository_url);
     return {
       title: i.title,
+      body: i.body ?? "",
       repo,
       isPrivate: privateNames.has(repo),
       redacted: false,

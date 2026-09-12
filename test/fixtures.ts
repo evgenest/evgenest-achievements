@@ -22,7 +22,8 @@ export function makeConfig(overrides: Record<string, string> = {}): Config {
 
 export function makeCommit(overrides: Partial<CommitInfo> = {}): CommitInfo {
   return {
-    message: "feat: something",
+    headline: "feat: something",
+    message: "feat: something\n\nAdds the thing behind a feature flag.",
     date: "2026-08-05T12:00:00Z",
     additions: 10,
     deletions: 2,
@@ -53,6 +54,7 @@ export function makeRepo(overrides: Partial<RepoActivity> = {}): RepoActivity {
 export function makePr(overrides: Partial<PrInfo> = {}): PrInfo {
   return {
     title: "Add feature",
+    body: "Implements the feature and covers it with tests.",
     repo: "octocat/public-repo",
     isPrivate: false,
     redacted: false,
@@ -65,6 +67,7 @@ export function makePr(overrides: Partial<PrInfo> = {}): PrInfo {
 export function makeIssue(overrides: Partial<IssueInfo> = {}): IssueInfo {
   return {
     title: "Something is broken",
+    body: "Steps to reproduce: open the page twice.",
     repo: "octocat/public-repo",
     isPrivate: false,
     redacted: false,

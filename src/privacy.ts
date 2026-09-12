@@ -6,7 +6,8 @@ import type { IssueInfo, PrInfo, RepoActivity, WeekActivity } from "./types";
  *
  * Runs before anything leaves the worker: the report, the LLM payload and the
  * Telegram message all derive from the transformed object, so private names,
- * commit messages, issue titles and URLs cannot leak through any of them.
+ * commit messages, PR/issue titles and descriptions and URLs cannot leak through
+ * any of them.
  */
 export function applyPrivacy(week: WeekActivity, mode: PrivacyMode): WeekActivity {
   if (mode === "full") return week;
@@ -50,15 +51,15 @@ function redactPrivate(week: WeekActivity): WeekActivity {
       redacted: true,
       url: "",
       // Counts and dates stay (metrics, night-owl achievement); text and links go.
-      commits: r.commits.map((c) => ({ ...c, message: "", url: "" })),
+      commits: r.commits.map((c) => ({ ...c, headline: "", message: "", url: "" })),
     };
   });
 
   const prs: PrInfo[] = week.prs.map((p) =>
-    p.isPrivate ? { ...p, repo: placeholderFor(p.repo), redacted: true, title: "", url: "" } : p,
+    p.isPrivate ? { ...p, repo: placeholderFor(p.repo), redacted: true, title: "", body: "", url: "" } : p,
   );
   const issues: IssueInfo[] = week.issues.map((i) =>
-    i.isPrivate ? { ...i, repo: placeholderFor(i.repo), redacted: true, title: "", url: "" } : i,
+    i.isPrivate ? { ...i, repo: placeholderFor(i.repo), redacted: true, title: "", body: "", url: "" } : i,
   );
 
   return { ...week, repos, prs, issues };

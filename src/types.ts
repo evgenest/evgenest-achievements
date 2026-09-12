@@ -1,4 +1,7 @@
 export interface CommitInfo {
+  /** First line only — what the markdown report lists. */
+  headline: string;
+  /** Full commit message (headline + body) — what the LLM payload gets. */
   message: string;
   date: string; // ISO
   additions: number;
@@ -27,6 +30,8 @@ export interface RepoActivity {
 
 export interface PrInfo {
   title: string;
+  /** Description; empty when the PR has none. */
+  body: string;
   repo: string;
   isPrivate: boolean;
   redacted: boolean;
@@ -36,6 +41,8 @@ export interface PrInfo {
 
 export interface IssueInfo {
   title: string;
+  /** Description; empty when the issue has none. */
+  body: string;
   repo: string;
   isPrivate: boolean;
   redacted: boolean;
