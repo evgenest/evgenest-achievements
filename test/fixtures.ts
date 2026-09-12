@@ -1,5 +1,5 @@
 import { loadConfig, type Config } from "../src/config";
-import type { AppState, CommitInfo, IssueInfo, PrInfo, RepoActivity, WeekActivity } from "../src/types";
+import type { AppState, CommitInfo, IssueInfo, MarketRates, PrInfo, RepoActivity, WeekActivity } from "../src/types";
 
 const BASE_ENV: Record<string, string> = {
   GITHUB_USER: "octocat",
@@ -132,6 +132,19 @@ export function makeState(overrides: Partial<AppState> = {}): AppState {
     unlocked: [],
     lastWeek: null,
     lastRunUntil: null,
+    ...overrides,
+  };
+}
+
+export function makeRates(overrides: Partial<MarketRates> = {}): MarketRates {
+  return {
+    annualGross: 52_000,
+    freelanceHourly: 75,
+    currency: "EUR",
+    region: "Germany",
+    sources: [{ title: "Salary site", url: "https://salaries.example/dev" }],
+    fetchedAt: "2026-08-01T08:00:00.000Z",
+    profileHash: "0".repeat(64),
     ...overrides,
   };
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { staleReason } from "../src/rates";
 import { advanceState, deleteLatestState, isActiveWeek, listStateVersions, loadState, saveState } from "../src/state";
-import { makeKvEnv, makeRepo, makeState, makeWeek } from "./fixtures";
+import { makeKvEnv, makeRates, makeRepo, makeState, makeWeek } from "./fixtures";
 
 const emptyWeek = () => makeWeek({ repos: [], prs: [], issues: [] });
 
@@ -47,6 +48,36 @@ describe("advanceState", () => {
     const next = advanceState(makeState({ unlocked: ["first-report"] }), makeWeek(), ["marathon"]);
     expect(next.unlocked).toEqual(["first-report", "marathon"]);
     expect(next.lastRunUntil).toBe(makeWeek().until);
+  });
+
+  it("carries cached rates forward when no fresh ones are passed", () => {
+    const rates = makeRates();
+    expect(advanceState(makeState({ rates }), makeWeek(), []).rates).toEqual(rates);
+  });
+
+  it("stores freshly looked-up rates", () => {
+    const fresh = makeRates({ annualGross: 70_000 });
+    expect(advanceState(makeState({ rates: makeRates() }), makeWeek(), [], fresh).rates).toBe(fresh);
+  });
+});
+
+describe("rates in old snapshots", () => {
+  it("loads a snapshot written before rates existed and treats the cache as missing", async () => {
+    const env = makeKvEnv();
+    const { rates: _omit, ...legacy } = makeState({ reportCount: 3 });
+    await env.STATE.put("state:2026-08-07T08:00:00.000Z", JSON.stringify(legacy));
+
+    const loaded = await loadState(env);
+    expect(loaded.reportCount).toBe(3);
+    expect(loaded.rates).toBeUndefined();
+    expect(staleReason(loaded.rates, "hash", "EUR", new Date())).toBe("missing");
+    expect(advanceState(loaded, makeWeek(), []).rates).toBeNull();
+  });
+
+  it("round-trips rates through a saved snapshot", async () => {
+    const env = makeKvEnv();
+    await saveState(env, makeState({ rates: makeRates() }));
+    expect((await loadState(env)).rates).toEqual(makeRates());
   });
 });
 

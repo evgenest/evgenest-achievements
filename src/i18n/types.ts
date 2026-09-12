@@ -3,8 +3,6 @@ export type Lang = "en" | "ru";
 export interface PromptContext {
   devProfile: string;
   languageName: string;
-  currency: string;
-  salaryEstimate: boolean;
 }
 
 export interface Messages {
@@ -45,7 +43,14 @@ export interface Messages {
     };
     commitsDetails: string;
     redactedNote: string;
-    cost: { hours: (hours: string) => string; office: (money: string) => string; freelance: (money: string) => string };
+    cost: {
+      hours: (hours: string) => string;
+      office: (money: string) => string;
+      freelance: (money: string) => string;
+      rates: (p: { annual: string; hourly: string; region: string; date: string }) => string;
+      sources: (links: string) => string;
+      noSources: string;
+    };
     allTimeLine: (parts: { commits: string; prs: string; issues: string; weeks: string; achievements: string }) => string;
     generatedBy: (provider: string, model: string) => string;
   };
