@@ -2,7 +2,7 @@
 
 A Cloudflare Worker that turns a week of your GitHub activity into a report you actually want to read.
 
-Once a week it scans every repository you touched — commits, pull requests, issues, CI runs, deployments — asks an LLM to describe what was accomplished (per project, in plain language, plus an optional "what this week was worth on the market" estimate), commits the markdown to a reports repository and sends a short summary to Telegram. Streaks and achievements are tracked across runs in Workers KV.
+Once a week it scans every repository you touched — commits, pull requests, issues, CI runs, deployments — asks an LLM to describe what was accomplished (per project, in plain language) and how long each commit realistically took, computes focused hours and an optional "what this week was worth on the market" estimate from that, commits the markdown to a reports repository and sends a short summary to Telegram. Streaks, achievements and cached market rates are kept across runs in Workers KV.
 
 It was built as a personal "wall of fame" for a developer who tends to undervalue their own work. Everything personal about it — the profile, the language, the currency, the time zone, the tone — is configuration.
 
@@ -12,16 +12,19 @@ It was built as a personal "wall of fame" for a developer who tends to undervalu
 cron (weekly)
   └─ collect GitHub activity (REST + GraphQL)
        └─ apply privacy policy for private repos
-            └─ sanitize → LLM (OpenAI or Vercel AI Gateway)
+            ├─ sanitize → LLM (OpenAI or Vercel AI Gateway)
+            ├─ market rates: KV cache, web search only when stale (optional)
+            └─ focused hours + cost computed in code
                  └─ build markdown → commit to reports repo
                       └─ Telegram notification
-                           └─ persist streak / totals / achievements in KV
+                           └─ persist streak / totals / achievements / rates in KV
 ```
 
 - **Cloudflare Worker** with a cron trigger, plus authenticated `/run` and `/state` endpoints for manual runs and rolling them back
 - **GitHub API**: REST (repo list, PR/issue search, committing the report) and GraphQL (commits with per-commit stats in a single request)
 - **LLM**: OpenAI Responses API directly, or the same models through the Vercel AI Gateway (`@ai-sdk/gateway` + `ai`) — switched with `LLM_PROVIDER`. Structured output either way
-- **Workers KV**: streak, all-time totals, unlocked achievements, previous-week snapshot — appended as a new snapshot per run, so a test run can be rolled back (see [State history](#state-history))
+- **Web search** (only for the optional salary estimate, only when cached rates are stale): a provider-executed search tool through the AI SDK — `openai.tools.webSearch()` from `@ai-sdk/openai` with `LLM_PROVIDER=openai`, the Gateway's `perplexitySearch` with `LLM_PROVIDER=vercel` (see [Focused hours and salary estimate](#focused-hours-and-salary-estimate))
+- **Workers KV**: streak, all-time totals, unlocked achievements, previous-week snapshot, cached market rates — appended as a new snapshot per run, so a test run can be rolled back (see [State history](#state-history))
 - **Telegram Bot API**: outbound `sendMessage` only, no webhook
 - Every report ends with a `provider/model` signature line, so a report stays self-describing even after `LLM_PROVIDER`/`LLM_MODEL` change later
 
@@ -35,6 +38,11 @@ src/github.ts       — activity collection + committing the report
 src/privacy.ts      — private repository policy (full / redact / skip)
 src/sanitize.ts     — data guard for everything sent to the LLM
 src/llm.ts          — prompt and model call
+src/hours.ts        — commit timeline, time windows, focused-hours math
+src/rates.ts        — market-rate cache (freshness, fallbacks)
+src/rates-lookup.ts — market-rate lookup: profile extraction + web search
+src/rates-prompt.ts — prompts of the rate lookup
+src/cost.ts         — hours × rates arithmetic
 src/report.ts       — markdown assembly
 src/telegram.ts     — notifications
 src/state.ts        — KV-backed state (append-only snapshot history)
@@ -45,13 +53,63 @@ src/time.ts         — time-zone-aware date helpers
 
 ## What reaches the LLM
 
-The GitHub token can read code, but the application never asks for any: it only reads commit headlines, line counters, PR/issue titles, languages, and CI/deployment statistics. Before a request is made, the payload goes through `src/sanitize.ts`:
+The GitHub token can read code, but the application never asks for any: it only reads commit headlines, line counters, commit times, PR/issue titles, languages, and CI/deployment statistics. Before a request is made, the payload goes through `src/sanitize.ts`:
 
 - a single exit point — the payload is an explicit projection over an allowlist of fields;
 - every key of the finished payload is checked recursively, fail-closed: an unknown key raises an error instead of being sent;
 - text fields are clipped to 200 characters.
 
-File contents, diffs and patches cannot get there by construction. The same payload and the same path are used for both LLM providers.
+Commits are sent as one chronological list across all repositories: id, repository, headline, lines added/removed, and the time window in minutes since the previous commit (plus whether it starts a new work session). Commit timestamps themselves are not sent. For repositories redacted by `PRIVATE_REPOS=redact` each commit contributes only its line counters and time window — no name, no text (before, redacted repos contributed per-repository counters only).
+
+File contents, diffs and patches cannot get there by construction. The same payload and the same path are used for both LLM providers. The optional market-rate lookup is a separate call with its own, much smaller input — see below.
+
+## Focused hours and salary estimate
+
+### Hours
+
+The model does not guess a weekly number. Every non-merge commit of the week, from every repository, goes on **one timeline** (a developer's time is shared between projects), ordered by author date — rebases rewrite the committer date of every commit to the same moment. Each commit gets a **window**: the minutes that actually passed since the previous commit. The model estimates, per commit, how many focused minutes the change took (size, complexity, message); code then:
+
+1. clamps each estimate into `[5 min, window]`;
+2. uses a deterministic heuristic (grows with the square root of the lines touched, still clamped into the window) for any commit the model skipped or answered with garbage;
+3. sums everything up and caps the week at 60 h.
+
+A long window is a ceiling, not the answer: a one-line fix two hours after the previous commit is still a few minutes. The knobs live together at the top of `src/hours.ts`:
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `SESSION_GAP_MINUTES` | 180 | A longer pause ends the work session |
+| `SESSION_START_MINUTES` | 120 | Window of the first commit of a session (the time before it is unknown) |
+| `MAX_WINDOW_MINUTES` | 150 | No commit can claim more, whatever the gap |
+| `MIN_COMMIT_MINUTES` | 5 | Floor per commit (never above its window) |
+| `WEEKLY_HOURS_CAP` | 60 | Ceiling on the weekly total |
+
+Example — four commits on one day:
+
+| Time | Repo | Change | Window | Model says | Counted |
+|---|---|---|---:|---:|---:|
+| 10:00 | app | +200/−20 | 120 (new session) | 90 | 90 |
+| 10:40 | lib | +15/−3 | 40 | 25 | 25 |
+| 13:10 | app | +5/−1 | 150 | 10 | 10 |
+| 19:00 | app | +400/−50 | 120 (new session, 5 h 50 min gap) | 180 | 120 |
+
+245 min ≈ **4.1 h**. Merge commits are excluded from everything (they repeat the lines of the merged branch), and hours only come from commits — reviews, issues and meetings are not counted.
+
+### Salary
+
+Only with `ENABLE_SALARY_ESTIMATE=true`. The amounts are arithmetic in code, never model output:
+
+- employed: `annual gross ÷ 52 × hours ÷ 40`;
+- freelance: `hours × hourly rate`.
+
+The two rates are **cached in the KV state** (with region, source links, fetch date, currency and a SHA-256 of `DEV_PROFILE` — never the profile text) and reused, so weeks stay comparable. A new lookup happens only when there is no cache, it is older than 90 days, `DEV_PROFILE` changed (hash) or `CURRENCY` changed. A lookup is three steps:
+
+1. **Extract** — a tool-less call turns `DEV_PROFILE` into role, seniority, main stack, region and country code, and is told to drop names, employers, clients, contacts and income. This is the only call that sees the profile text.
+2. **Search** — a second call gets only that extract (plus currency and date) and a provider-executed web search tool, and returns both rates, a region label and 1-5 source links as structured output. It is told to prefer the most popular job sites and salary databases for the region and to put nothing but role/seniority/stack/region into search queries. With `LLM_PROVIDER=openai` the tool is OpenAI's web search; with `LLM_PROVIDER=vercel` it is Perplexity search executed by the AI Gateway (so it works with any model the Gateway routes to), filtered to the extracted country. Whatever the search provider receives is built from those extracted fields only. Links are kept only if the search actually returned them.
+3. **Fallback** — if the search call fails or the model/tool doesn't support it, the same question is asked without tools (the model's own knowledge). Such rates carry no sources, say so in the report, and are cached for 7 days only, so a real search is retried soon.
+
+If every step fails, the previous (stale) rates are reused when they are in the same currency; otherwise the salary section is left out. A rates failure never fails the weekly run. The report's cost section lists the hours, both amounts, the rates used, the region, the fetch date and the source links.
+
+Rolling back a run (`DELETE /state/latest`) also drops rates that run looked up — handy for forcing a fresh lookup.
 
 ## Private repositories
 
@@ -78,9 +136,9 @@ and conservative defaults. Everything except the two identifiers has a working d
 | `REPORT_LANG` | `en` | `en` or `ru` — report copy, achievement names and the LLM prompt |
 | `REPORT_TITLE` | `Weekly Achievements` | Heading of every report |
 | `TIMEZONE` | `UTC` | IANA zone for dates and time-based achievements |
-| `CURRENCY` | `EUR` | ISO 4217 code for the salary estimate |
+| `CURRENCY` | `EUR` | ISO 4217 code for the salary estimate; changing it triggers a new rates lookup |
 | `PRIVATE_REPOS` | `redact` | `full` / `redact` / `skip` (see above) |
-| `ENABLE_SALARY_ESTIMATE` | `false` | Ask the model what the week would be worth on the market |
+| `ENABLE_SALARY_ESTIMATE` | `false` | Price the week's focused hours at market rates found by web search and cached for ~90 days (see [Salary](#salary)) |
 | `MAX_REPOS` | `15` | Upper bound on repositories inspected per run |
 | `LLM_PROVIDER` | `openai` | `openai` (direct) or `vercel` (AI Gateway) |
 | `LLM_MODEL` | `gpt-5.6-luna` | `provider/model` for the Gateway, a bare model name for OpenAI |
@@ -97,7 +155,7 @@ Secrets (`wrangler secret put <NAME>`, or `.dev.vars` locally — see `.dev.vars
 | `TELEGRAM_BOT_TOKEN` | Bot token from @BotFather |
 | `TELEGRAM_CHAT_ID` | Your chat with the bot (send it `/start`, read the id from `getUpdates`) |
 | `RUN_SECRET` | Any string; the bearer token for manual runs |
-| `DEV_PROFILE` | Free-form developer profile for the prompt (stack, seniority, region). A secret rather than a var: it is personal data and it drives the salary estimate |
+| `DEV_PROFILE` | Free-form developer profile for the prompt (stack, seniority, region). A secret rather than a var: it is personal data. With the salary estimate on, role/seniority/stack/region are extracted from it for the rates search — the text itself never reaches the search step or KV |
 
 If `DEV_PROFILE` grows past a one-liner, keep it as a gitignored `DEV_PROFILE.md` (Markdown
 headings are fine — the prompt reads it as plain text) and run `bun run sync:dev-profile` to
@@ -244,8 +302,9 @@ Notes:
 
 ## Known limitations
 
-- Commit messages and issue titles written by other people end up in the prompt, so the usual prompt-injection caveats apply. The blast radius is limited to the wording of your own report — the model has no tools and no write access.
-- Only default-branch commits authored by `GITHUB_USER` are counted, up to 100 per repository per run.
+- Commit messages and issue titles written by other people end up in the prompt, so the usual prompt-injection caveats apply. The blast radius is limited to the wording of your own report — the report model has no tools and no write access. The rates lookup has a read-only web search tool; a poisoned search result can at worst skew the cached rates (see [SECURITY.md](SECURITY.md)).
+- Only default-branch commits authored by `GITHUB_USER` are counted, up to 100 per repository per run; merge commits are fetched but excluded.
+- Focused hours come from commits only — code review, writing issues and meetings are invisible to them.
 - CI and deployment stats are fetched for at most 10 repositories per run (Workers subrequest budget).
 - Missed runs are caught up from the last successful one, but never more than 4 weeks back.
 
