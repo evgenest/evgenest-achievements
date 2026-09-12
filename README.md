@@ -36,6 +36,7 @@ src/run.ts          — weekly run orchestrator
 src/config.ts       — env → validated config with defaults
 src/github.ts       — activity collection + committing the report
 src/privacy.ts      — private repository policy (full / redact / skip)
+src/repo-visibility.ts — fail-closed visibility of repos behind PRs/issues
 src/sanitize.ts     — data guard for everything sent to the LLM
 src/secrets.ts      — secret scrubbing for LLM-bound text (fail-closed re-check)
 src/llm.ts          — prompt and model call
@@ -124,6 +125,8 @@ Rolling back a run (`DELETE /state/latest`) also drops rates that run looked up 
 | `full` | Names, commit headlines and links appear in the report as-is; the LLM gets full commit messages and PR/issue descriptions (secret-scrubbed, clipped), same as for public repositories. Only sensible if the reports repository is private. |
 | `redact` | The repository is still counted (commits, lines, CI, achievements), but its name becomes `private-project-N` and commit messages, PR/issue titles, descriptions and links are dropped — including in the LLM payload. Default. |
 | `skip` | Private activity is excluded from the report and the totals entirely. |
+
+PR/issue search results carry no visibility flag. Visibility comes from the account's full repository list (`/user/repos`, paginated); a repository missing from it — past the last fetched page, or someone else's repository you opened a PR in — is looked up once via `GET /repos/{owner}/{repo}`. The check is fail-closed: if visibility cannot be confirmed (lookup failed, 404/403, over the per-run lookup budget), the repository counts as private, so the worst case is a hidden public PR, never a leaked private one.
 
 Reports contain whatever the policy allows through, so keep the reports repository private unless you have deliberately chosen `redact` or `skip`.
 
