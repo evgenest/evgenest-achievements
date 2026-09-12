@@ -37,6 +37,7 @@ src/config.ts       — env → validated config with defaults
 src/github.ts       — activity collection + committing the report
 src/privacy.ts      — private repository policy (full / redact / skip)
 src/sanitize.ts     — data guard for everything sent to the LLM
+src/secrets.ts      — secret scrubbing for LLM-bound text (fail-closed re-check)
 src/llm.ts          — prompt and model call
 src/hours.ts        — commit timeline, time windows, focused-hours math
 src/rates.ts        — market-rate cache (freshness, fallbacks)
@@ -53,15 +54,18 @@ src/time.ts         — time-zone-aware date helpers
 
 ## What reaches the LLM
 
-The GitHub token can read code, but the application never asks for any: it only reads commit headlines, line counters, commit times, PR/issue titles, languages, and CI/deployment statistics. Before a request is made, the payload goes through `src/sanitize.ts`:
+The GitHub token can read code, but the application never asks for any: it only reads full commit messages (headline + body), line counters, commit times, PR/issue titles and descriptions, languages, and CI/deployment statistics. Before a request is made, the payload goes through `src/sanitize.ts`:
 
 - a single exit point — the payload is an explicit projection over an allowlist of fields;
 - every key of the finished payload is checked recursively, fail-closed: an unknown key raises an error instead of being sent;
-- text fields are clipped to 200 characters.
+- free text (commit messages, PR/issue titles and descriptions) loses its HTML comments, gets secret-like substrings replaced with `[secret]` and is then clipped to 1000 characters;
+- every string of the finished payload is re-scanned for secrets, fail-closed: anything secret-like left over blocks the LLM call instead of being sent.
 
-Commits are sent as one chronological list across all repositories: id, repository, headline, lines added/removed, and the time window in minutes since the previous commit (plus whether it starts a new work session). Commit timestamps themselves are not sent. For repositories redacted by `PRIVATE_REPOS=redact` each commit contributes only its line counters and time window — no name, no text (before, redacted repos contributed per-repository counters only).
+Commits are sent as one chronological list across all repositories: id, repository, full message (headline + body), lines added/removed, and the time window in minutes since the previous commit (plus whether it starts a new work session). Commit timestamps themselves are not sent. For repositories redacted by `PRIVATE_REPOS=redact` each commit contributes only its line counters and time window — no name, no text (before, redacted repos contributed per-repository counters only).
 
-File contents, diffs and patches cannot get there by construction. The same payload and the same path are used for both LLM providers. The optional market-rate lookup is a separate call with its own, much smaller input — see below.
+The scrubber (`src/secrets.ts`) covers PEM private key blocks, `scheme://user:password@` credentials, JWTs, `sk-…` API keys, GitHub tokens (`ghp_`/`gho_`/`ghu_`/`ghs_`/`ghr_`/`github_pat_`), AWS access key IDs (`AKIA`/`ASIA`), Slack tokens (`xoxa-`/`xoxb-`/`xoxp-`/`xoxr-`/`xoxs-`), Telegram bot tokens, `Bearer <token>`, hex runs of 32+ characters (a 40-character git SHA is kept) and random-looking base64 runs of 32+ characters. It is a heuristic for credential-shaped strings, not a privacy filter.
+
+File contents, diffs and patches cannot get there by construction. Commit messages and descriptions are human-written, though, and may quote code, links or internal details on their own — for private repositories that is what `PRIVATE_REPOS=redact` is for. The markdown report still lists commit headlines only. The same payload and the same path are used for both LLM providers. The optional market-rate lookup is a separate call with its own, much smaller input — see below.
 
 ## Focused hours and salary estimate
 
@@ -117,8 +121,8 @@ Rolling back a run (`DELETE /state/latest`) also drops rates that run looked up 
 
 | Mode | Effect |
 |---|---|
-| `full` | Names, commit messages and links appear in the report as-is. Only sensible if the reports repository is private. |
-| `redact` | The repository is still counted (commits, lines, CI, achievements), but its name becomes `private-project-N` and commit messages, titles and links are dropped — including in the LLM payload. Default. |
+| `full` | Names, commit headlines and links appear in the report as-is; the LLM gets full commit messages and PR/issue descriptions (secret-scrubbed, clipped), same as for public repositories. Only sensible if the reports repository is private. |
+| `redact` | The repository is still counted (commits, lines, CI, achievements), but its name becomes `private-project-N` and commit messages, PR/issue titles, descriptions and links are dropped — including in the LLM payload. Default. |
 | `skip` | Private activity is excluded from the report and the totals entirely. |
 
 Reports contain whatever the policy allows through, so keep the reports repository private unless you have deliberately chosen `redact` or `skip`.
