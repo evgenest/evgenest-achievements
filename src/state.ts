@@ -1,4 +1,4 @@
-import type { AppState, WeekActivity } from "./types";
+import type { AppState, MarketRates, WeekActivity } from "./types";
 
 /**
  * State is append-only: every run writes a new snapshot under `state:<ISO timestamp>`,
@@ -20,6 +20,7 @@ const EMPTY_STATE: AppState = {
   unlocked: [],
   lastWeek: null,
   lastRunUntil: null,
+  rates: null,
 };
 
 /** Stored alongside the snapshot so the history can be listed without reading every value. */
@@ -62,8 +63,16 @@ export function isActiveWeek(week: WeekActivity): boolean {
   return week.totalCommits > 0 || week.prs.length > 0 || week.issues.length > 0;
 }
 
-/** Next state after a week: streak, totals, snapshot. Does not mutate the input. */
-export function advanceState(state: AppState, week: WeekActivity, newlyUnlocked: string[]): AppState {
+/**
+ * Next state after a week: streak, totals, snapshot. Does not mutate the input.
+ * Cached market rates are carried forward unless fresher ones are passed in.
+ */
+export function advanceState(
+  state: AppState,
+  week: WeekActivity,
+  newlyUnlocked: string[],
+  rates: MarketRates | null = state.rates ?? null,
+): AppState {
   const active = isActiveWeek(week);
   const streak = active ? state.streak + 1 : 0;
   return {
@@ -87,6 +96,7 @@ export function advanceState(state: AppState, week: WeekActivity, newlyUnlocked:
       deletions: week.totalDeletions,
     },
     lastRunUntil: week.until,
+    rates,
   };
 }
 

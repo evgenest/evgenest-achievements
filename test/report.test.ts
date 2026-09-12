@@ -1,25 +1,28 @@
 import { describe, expect, it } from "vitest";
+import { computeWeekCost } from "../src/cost";
 import { buildReport } from "../src/report";
-import type { LlmResult } from "../src/types";
-import { makeCommit, makeConfig, makeIssue, makePr, makeRepo, makeState, makeWeek } from "./fixtures";
+import type { LlmResult, WeekCost } from "../src/types";
+import { makeCommit, makeConfig, makeIssue, makePr, makeRates, makeRepo, makeState, makeWeek } from "./fixtures";
 
 const llm: LlmResult = {
   projectSummaries: [{ repo: "octocat/public-repo", summary: "Shipped the thing." }],
   commitMinutes: [],
-  salary: { employeeWeek: 1234, freelanceWeek: 2345, rationale: "Rates used: ..." },
   praise: "Solid week.",
   telegramMessage: "Hi!",
 };
 
-const render = (configOverrides = {}, weekOverrides = {}, llmOverrides: Partial<LlmResult> = {}) =>
+// 52 000/yr → 1 000/week → × 12.4/40 = 310; freelance 12.4 × 75 = 930
+const defaultCost = computeWeekCost(12.4, makeRates());
+
+const render = (configOverrides = {}, weekOverrides = {}, cost: WeekCost | null = defaultCost) =>
   buildReport({
     config: makeConfig(configOverrides),
     week: makeWeek(weekOverrides),
     state: makeState(),
     newStreak: 2,
     achievements: [{ id: "marathon", title: "Marathoner", description: "10+ commits in a week" }],
-    llm: { ...llm, ...llmOverrides },
-    hours: 12.4,
+    llm,
+    cost,
   });
 
 describe("buildReport", () => {
@@ -38,17 +41,45 @@ describe("buildReport", () => {
   });
 
   it("uses the configured currency for the salary block", () => {
-    expect(render()).toMatch(/€\s?1[,. ]?234/);
-    expect(render({ CURRENCY: "USD" })).toMatch(/\$1[,. ]?234/);
+    expect(render()).toContain("Employed: **~€310** for the week");
+    expect(render()).toContain("Freelance: **~€930** for the week");
+    expect(render({ CURRENCY: "USD" })).toContain("Employed: **~$310** for the week");
   });
 
   it("shows the hours computed in code, not a model guess", () => {
     expect(render()).toContain("Estimated focused hours: **~12.4 h**");
   });
 
+  it("shows the rates used, region, fetch date and source links", () => {
+    const md = render();
+    expect(md).toContain("Rates: ~€52,000 gross/year employed, ~€75/h freelance · Germany · as of Aug 1, 2026.");
+    expect(md).toContain("Sources: [Salary site](https://salaries.example/dev)");
+  });
+
+  it("says so when the rates are a model estimate without sources", () => {
+    const md = render({}, {}, computeWeekCost(12.4, makeRates({ sources: [] })));
+    expect(md).toContain("_No sources: web search was unavailable");
+    expect(md).not.toContain("Sources:");
+  });
+
+  it("renders the cost section in Russian", () => {
+    const md = render({ REPORT_LANG: "ru" });
+    expect(md).toContain("## Сколько это стоило бы");
+    expect(md).toContain("Ставки: ~");
+    expect(md).toContain("Источники: [Salary site]");
+  });
+
   it("omits the salary block when the estimate is disabled", () => {
-    const md = render({ ENABLE_SALARY_ESTIMATE: "false" }, {}, { salary: undefined });
+    const md = render({ ENABLE_SALARY_ESTIMATE: "false" }, {}, null);
     expect(md).not.toContain("What this week was worth");
+  });
+
+  it("omits the salary block when no rates are known", () => {
+    expect(render({}, {}, null)).not.toContain("What this week was worth");
+  });
+
+  it("puts no price tag on a week without focused hours", () => {
+    expect(render({}, {}, computeWeekCost(0, makeRates()))).not.toContain("What this week was worth");
   });
 
   it("shows a delta against the previous week", () => {
@@ -59,7 +90,7 @@ describe("buildReport", () => {
       newStreak: 1,
       achievements: [],
       llm,
-      hours: 1,
+      cost: null,
     });
     expect(md).toMatch(/\| Commits \| 1 \| -4 \|/);
   });

@@ -7,14 +7,9 @@ import { buildLlmPayload } from "./sanitize";
 import type { AppState, LlmResult, WeekActivity } from "./types";
 
 // One schema serves both the runtime validation (Vercel/generateText) and the
-// JSON Schema handed to the OpenAI Responses API.
-const SALARY_SCHEMA = z.strictObject({
-  employeeWeek: z.number(),
-  freelanceWeek: z.number(),
-  rationale: z.string(),
-});
-
-const BASE_SHAPE = {
+// JSON Schema handed to the OpenAI Responses API. Hours and money are not asked for:
+// both are computed in code (hours.ts, rates.ts, cost.ts).
+const RESULT_SHAPE = {
   projectSummaries: z.array(z.strictObject({ repo: z.string(), summary: z.string() })),
   // Per-commit focused minutes; hours are computed from these in code (see hours.ts).
   commitMinutes: z.array(z.strictObject({ id: z.number(), minutes: z.number() })),
@@ -24,12 +19,7 @@ const BASE_SHAPE = {
 
 type ResultSchema = z.ZodType<LlmResult>;
 
-/** The salary block is only requested (and only accepted) when the estimate is enabled. */
-function resultSchema(salaryEstimate: boolean): ResultSchema {
-  return (
-    salaryEstimate ? z.strictObject({ ...BASE_SHAPE, salary: SALARY_SCHEMA }) : z.strictObject(BASE_SHAPE)
-  ) as ResultSchema;
-}
+const RESULT_SCHEMA = z.strictObject(RESULT_SHAPE) as ResultSchema;
 
 function safeJsonParse(text: string): unknown {
   try {
@@ -112,8 +102,6 @@ function systemPrompt(config: Config): string {
   return config.messages.prompt({
     devProfile: config.devProfile,
     languageName: config.messages.languageName,
-    currency: config.currency,
-    salaryEstimate: config.salaryEstimate,
   });
 }
 
@@ -212,7 +200,7 @@ export async function generateInsights(
   // The only path across the boundary into an LLM goes through the guard (see sanitize.ts)
   const input = buildLlmPayload(week, state, newStreak, timeline);
   const instructions = systemPrompt(config);
-  const schema = resultSchema(config.salaryEstimate);
+  const schema = RESULT_SCHEMA;
 
   return config.llm.provider === "vercel"
     ? callVercel(env, config, schema, instructions, input)

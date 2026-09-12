@@ -79,13 +79,35 @@ export interface AppState {
   unlocked: string[];
   lastWeek: WeekSnapshot | null;
   lastRunUntil: string | null; // ISO — end of the period of the last successful run
+  /** Cached market rates for the salary estimate; absent in snapshots written before it existed. */
+  rates?: MarketRates | null;
 }
 
-export interface SalaryEstimate {
-  /** Amounts are in the currency configured via CURRENCY. */
+export interface RateSource {
+  title: string;
+  url: string;
+}
+
+/** Market rates cached in state (see rates.ts); amounts are in `currency`. */
+export interface MarketRates {
+  annualGross: number;
+  freelanceHourly: number;
+  currency: string;
+  /** Human-readable region the rates apply to, in the report language. */
+  region: string;
+  /** Pages the web search returned; empty = the model's own estimate without search. */
+  sources: RateSource[];
+  fetchedAt: string; // ISO
+  /** SHA-256 of DEV_PROFILE at lookup time — the profile text itself is never stored. */
+  profileHash: string;
+}
+
+/** What the week's focused hours are worth at the cached rates — computed in code. */
+export interface WeekCost {
+  hours: number;
   employeeWeek: number;
   freelanceWeek: number;
-  rationale: string;
+  rates: MarketRates;
 }
 
 /** The model's per-commit answer; `id` refers to the commit's position in the timeline. */
@@ -97,8 +119,6 @@ export interface CommitEstimate {
 export interface LlmResult {
   projectSummaries: { repo: string; summary: string }[];
   commitMinutes: CommitEstimate[];
-  /** Present only when ENABLE_SALARY_ESTIMATE is on. */
-  salary?: SalaryEstimate;
   praise: string;
   telegramMessage: string;
 }

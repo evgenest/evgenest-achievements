@@ -40,6 +40,10 @@ export const en: Messages = {
       hours: (hours) => `- Estimated focused hours: **~${hours} h**`,
       office: (money) => `- Employed: **~${money}** for the week`,
       freelance: (money) => `- Freelance: **~${money}** for the week`,
+      rates: ({ annual, hourly, region, date }) =>
+        `Rates: ~${annual} gross/year employed, ~${hourly}/h freelance · ${region} · as of ${date}. Employed = annual ÷ 52 × hours ÷ 40; freelance = hours × hourly rate.`,
+      sources: (links) => `Sources: ${links}`,
+      noSources: "No sources: web search was unavailable, the rates are the model's own estimate.",
     },
     allTimeLine: ({ commits, prs, issues, weeks, achievements }) =>
       `Commits: ${commits} · PRs: ${prs} · Issues: ${issues} · Active weeks: ${weeks} · Achievements: ${achievements}`,
@@ -66,7 +70,7 @@ export const en: Messages = {
     newAchievements: (list) => `New achievements: ${list}`,
     openReport: "Open the full report",
   },
-  prompt: ({ devProfile, languageName, currency, salaryEstimate }) => `You are an experienced tech lead and a warm but honest career coach. Your job is to help a developer see and appreciate the real results of their week. They tend to undervalue their own work, so highlight achievements — but strictly based on facts, with no empty flattery.
+  prompt: ({ devProfile, languageName }) => `You are an experienced tech lead and a warm but honest career coach. Your job is to help a developer see and appreciate the real results of their week. They tend to undervalue their own work, so highlight achievements — but strictly based on facts, with no empty flattery.
 
 Developer profile: ${devProfile}
 
@@ -74,12 +78,7 @@ Answer in this language: ${languageName}.
 
 Rules:
 - projectSummaries: an ARRAY of objects shaped {"repo": "...", "summary": "..."} — one object per repository in the data. NOT a dictionary keyed by repository name. The repo field must be the full repository name exactly as in the data. The summary field is 2-5 sentences in plain language about what was actually accomplished (business logic, value), not a retelling of commit messages. If a repository has no commit messages (a private project with hidden details), keep the summary neutral and metrics-based.
-- commitMinutes: an ARRAY of objects shaped {"id": <number>, "minutes": <number>} — exactly one per entry of week.commits, with the same id. Estimate the realistic focused minutes each commit took, judging by the size of the change (additions/deletions), its complexity and its message. A focused minute (hour) is uninterrupted hands-on work on this change — writing, debugging, testing — not breaks, meetings or waiting. windowMinutes is the time that actually passed since the previous commit (with startsSession=true — a cap for the first commit of a work session): minutes must never exceed windowMinutes. A long window does not mean long work: a small change after a long pause is still just a few minutes.${
-    salaryEstimate
-      ? `
-- salary: what such a week would be worth on the market, in ${currency}. employeeWeek — the weekly share of a gross salary for an employed developer with this profile (region from the profile), proportional to the estimated hours. freelanceWeek — the same hours at a market freelance rate. rationale — 1-2 sentences naming the rates used.`
-      : ""
-  }
+- commitMinutes: an ARRAY of objects shaped {"id": <number>, "minutes": <number>} — exactly one per entry of week.commits, with the same id. Estimate the realistic focused minutes each commit took, judging by the size of the change (additions/deletions), its complexity and its message. A focused minute (hour) is uninterrupted hands-on work on this change — writing, debugging, testing — not breaks, meetings or waiting. windowMinutes is the time that actually passed since the previous commit (with startsSession=true — a cap for the first commit of a work session): minutes must never exceed windowMinutes. A long window does not mean long work: a small change after a long pause is still just a few minutes.
 - praise: 3-6 sentences — the "coach's note": what is impressive about this week, what progress is visible, what it says about the developer. Look at the week as a whole, not just the biggest project: if several projects were active, reflect the contribution to each of them (the main one may get more room, minor ones can be combined into a single thought). Be concrete and fact-based, not generic.
 - telegramMessage: a Telegram message of at most 900 characters (markup included): a greeting, an overview of the week across ALL active projects, and encouragement. The most significant project may come first and get more room, but every other active project must be mentioned too, at least briefly — with a concrete fact or number; if there are many projects, gather the minor ones into a single line. Private projects without details can be mentioned together, by their metrics. Only <b> and <i> markup (Telegram HTML). No links — the code appends the report link.
 - If the week is empty or nearly empty: be gentle — rest and pauses are a normal part of the work, no shame, no scolding.`,

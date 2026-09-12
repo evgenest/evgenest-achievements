@@ -1,9 +1,11 @@
 import { detectAchievements } from "./achievements";
 import { loadConfig } from "./config";
+import { computeWeekCost } from "./cost";
 import { collectWeekActivity, commitFile } from "./github";
 import { buildCommitTimeline, resolveHours } from "./hours";
 import { generateInsights } from "./llm";
 import { applyPrivacy } from "./privacy";
+import { resolveRates } from "./rates";
 import { buildReport } from "./report";
 import { advanceState, isActiveWeek, loadState, saveState } from "./state";
 import { notifyTelegram } from "./telegram";
@@ -41,7 +43,11 @@ export async function runWeekly(env: Env, until: Date): Promise<RunResult> {
   const newStreak = isActiveWeek(week) ? state.streak + 1 : 0;
   const achievements = detectAchievements(config, week, state, newStreak);
   const timeline = buildCommitTimeline(week);
-  const llm = await generateInsights(env, config, week, state, newStreak, timeline);
+  // Rates come from the state cache (a lookup only when stale) and never throw.
+  const [llm, rates] = await Promise.all([
+    generateInsights(env, config, week, state, newStreak, timeline),
+    config.salaryEstimate ? resolveRates(env, config, state.rates) : Promise.resolve(state.rates ?? null),
+  ]);
   const hours = resolveHours(timeline, llm.commitMinutes);
   console.log(
     JSON.stringify({
@@ -54,13 +60,15 @@ export async function runWeekly(env: Env, until: Date): Promise<RunResult> {
     }),
   );
 
-  const markdown = buildReport({ config, week, state, newStreak, achievements, llm, hours: hours.hours });
+  const cost = config.salaryEstimate && rates ? computeWeekCost(hours.hours, rates) : null;
+
+  const markdown = buildReport({ config, week, state, newStreak, achievements, llm, cost });
   const day = until.toISOString().slice(0, 10);
   const reportPath = `${config.reportsDir}/${day}.md`;
   const reportUrl = await commitFile(env, config, reportPath, markdown, `report: week of ${day}`);
 
   await notifyTelegram(env, config, llm.telegramMessage, achievements, reportUrl);
-  const stateKey = await saveState(env, advanceState(state, week, achievements.map((a) => a.id)));
+  const stateKey = await saveState(env, advanceState(state, week, achievements.map((a) => a.id), rates));
 
   return {
     stateKey,

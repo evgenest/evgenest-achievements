@@ -1,6 +1,6 @@
 import type { Config } from "./config";
 import { formatDate } from "./time";
-import type { AppState, LlmResult, UnlockedAchievement, WeekActivity } from "./types";
+import type { AppState, LlmResult, UnlockedAchievement, WeekActivity, WeekCost } from "./types";
 
 export interface ReportParams {
   config: Config;
@@ -9,8 +9,8 @@ export interface ReportParams {
   newStreak: number;
   achievements: UnlockedAchievement[];
   llm: LlmResult;
-  /** Focused hours computed in code (see hours.ts). */
-  hours: number;
+  /** Hours × cached market rates, computed in code; null when disabled or no rates are known. */
+  cost: WeekCost | null;
 }
 
 function delta(current: number, prev: number | undefined, num: (n: number) => string): string {
@@ -23,7 +23,7 @@ function link(text: string, url: string): string {
   return url ? `[${text}](${url})` : text;
 }
 
-export function buildReport({ config, week, state, newStreak, achievements, llm, hours }: ReportParams): string {
+export function buildReport({ config, week, state, newStreak, achievements, llm, cost }: ReportParams): string {
   const m = config.messages.report;
   const fmtDay = (iso: string): string => formatDate(iso, config.messages.locale, config.timezone);
   const num = (n: number): string => n.toLocaleString(config.messages.locale);
@@ -123,14 +123,22 @@ export function buildReport({ config, week, state, newStreak, achievements, llm,
     lines.push("");
   }
 
-  if (config.salaryEstimate && llm.salary) {
+  // An empty week gets no price tag — pauses are part of the work.
+  if (config.salaryEstimate && cost && cost.hours > 0) {
+    const r = cost.rates;
     lines.push(`## ${m.sections.cost}`);
     lines.push("");
-    lines.push(m.cost.hours(hours.toLocaleString(config.messages.locale, { maximumFractionDigits: 1 })));
-    lines.push(m.cost.office(money(llm.salary.employeeWeek)));
-    lines.push(m.cost.freelance(money(llm.salary.freelanceWeek)));
+    lines.push(m.cost.hours(cost.hours.toLocaleString(config.messages.locale, { maximumFractionDigits: 1 })));
+    lines.push(m.cost.office(money(cost.employeeWeek)));
+    lines.push(m.cost.freelance(money(cost.freelanceWeek)));
     lines.push("");
-    lines.push(`_${llm.salary.rationale}_`);
+    lines.push(
+      `_${m.cost.rates({ annual: money(r.annualGross), hourly: money(r.freelanceHourly), region: r.region, date: fmtDay(r.fetchedAt) })}_`,
+    );
+    lines.push("");
+    lines.push(
+      r.sources.length > 0 ? m.cost.sources(r.sources.map((s) => link(s.title, s.url)).join(" · ")) : `_${m.cost.noSources}_`,
+    );
     lines.push("");
   }
 
