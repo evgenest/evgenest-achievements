@@ -22,6 +22,7 @@
 | 2026-09-12 | Маршрут: **OpenRouter** (аккаунт Business уже есть), не Vercel | ZDR у Vercel только на Pro ($20/мес за место); у OpenRouter ZDR доступен на любом тарифе, комиссия 8% с пополнения — при ~$1/мес это центы |
 | 2026-09-12 | Модель: **Nemotron 3 Ultra** (US, ZDR), effort `high` | Нравилось, как пишет отчёты и сводки; `gpt-5.6-luna` слабая даже на `high`. Nemotron в EU нет — US с ZDR признан приемлемым |
 | 2026-09-12 | ZDR в коде захардкожен, без переключателя | Fail-closed, как `assertSanitized`: нет ZDR-эндпоинта — запрос падает, а не уходит к провайдеру, который хранит данные |
+| 2026-09-12 | Поиск ставок под OpenRouter — серверный `openrouter:web_search` (Exa), вне ZDR | ZDR-поиска у OpenRouter нет: ZDR покрывает только инференс. В запросы уходят только роль/уровень/стек/регион; сама модель (включая шаг, видящий `DEV_PROFILE`) — на ZDR |
 | 2026-09-12 | Аккаунт: **личный OpenRouter (Standard)**, не Business | ZDR (`provider.zdr`) работает на любом тарифе; Business нужен только для EU-роутинга, а Nemotron всё равно в US. Комиссия 5.5% вместо 8% |
 
 ## Текущий статус
@@ -31,6 +32,7 @@
 Проверено локально (без реального ключа): typecheck, тесты, сборка бандла (`wrangler deploy --dry-run`);
 тело запроса с подменённым `fetch` содержит `provider: { zdr: true, data_collection: "deny", require_parameters: true }`,
 `reasoning: { effort: "high" }`, `response_format: json_schema` со `strict: true`, без `plugins`.
+Поиск ставок: тот же ZDR-блок + `tools: [{ type: "openrouter:web_search" }]`.
 
 ## Открытые вопросы
 

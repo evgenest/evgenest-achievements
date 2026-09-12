@@ -97,7 +97,11 @@ ZDR обязателен, EU желательно. Выбран **OpenRouter** +
 - настройки модели: `provider: { zdr: true, data_collection: "deny", require_parameters: true }` — захардкожены, переключателя нет;
 - reasoning: провайдер **игнорирует** SDK-параметр `reasoning` у `generateText` и читает только свою настройку `reasoning: { effort }` — поэтому effort передаётся через неё (`provider-default` → не передаётся вовсе);
 - structured output: `Output.object` → `response_format: json_schema` со `strict: true` (дефолт провайдера);
-- при промахе схемы — то же восстановление из сырого текста, что у Vercel (`recoverSchemaMiss`).
+- при промахе схемы — то же восстановление из сырого текста, что у Vercel (`recoverSchemaMiss`);
+- настройка ZDR-модели вынесена в `src/openrouter.ts` (`openRouterZdr`) и общая для отчёта и поиска ставок (`src/rates-lookup.ts`);
+- поиск ставок: `tools.webSearch({})` → `openrouter:web_search`. `maxResults` не передаём: провайдер v3.0.0 кладёт его
+  в корень инструмента, а API читает параметры из вложенного `parameters` — остаётся дефолт (5 результатов);
+- у ZDR-эндпоинта DeepInfra есть `tools`, `structured_outputs` и `reasoning` — шаг поиска проходит и с `require_parameters`.
 
 ## Чеклист максимальной приватности
 
@@ -106,7 +110,10 @@ ZDR обязателен, EU желательно. Выбран **OpenRouter** +
 В коде (сделано):
 - [x] ZDR на каждом запросе, без фоллбэка на эндпоинты, которые хранят данные.
 - [x] `data_collection: "deny"` (избыточно при ZDR, но явно).
-- [x] Никаких плагинов OpenRouter (web search, response healing): на плагины ZDR не распространяется.
+- [x] В запросе отчёта никаких плагинов и серверных инструментов OpenRouter (web search, response healing): ZDR на них не распространяется.
+- [x] Единственное исключение — поиск рыночных ставок (`ENABLE_SALARY_ESTIMATE=true`, раз в ~90 дней): серверный инструмент
+  `openrouter:web_search`. У Nemotron нет нативного поиска, поэтому ищет Exa. Модель сама формулирует запросы, но видит только
+  выжимку профиля (роль, уровень, стек, регион) — текст `DEV_PROFILE` получает лишь шаг извлечения, и он идёт через ZDR.
 
 В личном аккаунте OpenRouter, из которого выпущен ключ (руками, [privacy settings](https://openrouter.ai/settings/privacy)):
 - [ ] Prompt logging — выключен (иначе OpenRouter сам хранит промпты).
@@ -118,6 +125,8 @@ ZDR обязателен, EU желательно. Выбран **OpenRouter** +
 - Провайдер может обработать и сохранить запрос, помеченный его системой abuse/safety, по своим правилам.
 - Логи воркера (Cloudflare Observability, `persist: true`): при ответе, который не парсится как JSON, в лог уходит превью сырого текста (до 300 символов, `describeLlmOutput` в `src/llm.ts`). Это своя инфраструктура, но текст там лежит.
 - Результат по построению уходит в репозиторий отчётов (GitHub) и в Telegram.
+- Поисковые запросы ставок (роль/уровень/стек/регион) уходят в Exa по его собственной политике хранения.
+  ZDR-варианта веб-поиска у OpenRouter нет: по документации ZDR покрывает только инференс, не плагины и серверные инструменты.
 
 ## Если понадобится EU
 
