@@ -1,5 +1,5 @@
 import { createGateway } from "@ai-sdk/gateway";
-import { generateText, NoObjectGeneratedError, Output } from "ai";
+import { type FinishReason, generateText, type LanguageModelUsage, NoObjectGeneratedError, Output } from "ai";
 import { z } from "zod";
 import type { Config, LlmProvider } from "./config";
 import type { TimelineCommit } from "./hours";
@@ -160,9 +160,31 @@ async function callOpenAI(env: Env, config: Config, schema: ResultSchema, instru
   throw new Error(`OpenAI: response did not match schema (${result ? "validation failed" : "invalid JSON"})`);
 }
 
+// Token counts only, no content: reasoning counts toward the endpoint's output cap, so this
+// shows how much headroom an answer had before a truncated one sinks the report.
+function logUsage(
+  provider: LlmProvider,
+  config: Config,
+  run: { usage: LanguageModelUsage | undefined; finishReason: FinishReason | undefined; endpoint?: unknown },
+): void {
+  console.log(
+    JSON.stringify({
+      event: "llm_usage",
+      provider,
+      model: config.llm.model,
+      endpoint: run.endpoint,
+      finishReason: run.finishReason,
+      inputTokens: run.usage?.inputTokens,
+      outputTokens: run.usage?.outputTokens,
+      reasoningTokens: run.usage?.outputTokenDetails.reasoningTokens,
+    }),
+  );
+}
+
 // When the SDK rejects the model's structured output, the raw text often still holds a
 // valid (or reshapeable) object — recover it before giving up. Rethrows otherwise.
 function recoverSchemaMiss(err: unknown, provider: LlmProvider, config: Config, schema: ResultSchema): LlmResult {
+  if (NoObjectGeneratedError.isInstance(err)) logUsage(provider, config, err);
   if (NoObjectGeneratedError.isInstance(err) && err.text) {
     const parsed = safeJsonParse(err.text);
     const recovered = parsed !== undefined ? schema.safeParse(normalizeLlmAnswer(parsed)) : undefined;
@@ -187,13 +209,14 @@ function recoverSchemaMiss(err: unknown, provider: LlmProvider, config: Config, 
 async function callVercel(env: Env, config: Config, schema: ResultSchema, instructions: string, input: unknown): Promise<LlmResult> {
   const gateway = createGateway({ apiKey: env.VERCEL_AI_GATEWAY_API_KEY });
   try {
-    const { output } = await generateText({
+    const { output, ...run } = await generateText({
       model: gateway(config.llm.model),
       instructions,
       prompt: activityPrompt(input),
       reasoning: config.llm.reasoningEffort,
       output: Output.object({ schema }),
     });
+    logUsage("vercel", config, run);
     return output;
   } catch (err) {
     return recoverSchemaMiss(err, "vercel", config, schema);
@@ -204,12 +227,14 @@ async function callVercel(env: Env, config: Config, schema: ResultSchema, instru
 async function callOpenRouter(env: Env, config: Config, schema: ResultSchema, instructions: string, input: unknown): Promise<LlmResult> {
   const { model } = openRouterZdr(env, config);
   try {
-    const { output } = await generateText({
+    const { output, usage, finishReason, providerMetadata } = await generateText({
       model,
       instructions,
       prompt: activityPrompt(input),
       output: Output.object({ schema }),
     });
+    // The upstream endpoint that served the request (e.g. DeepInfra): output caps differ per endpoint.
+    logUsage("openrouter", config, { usage, finishReason, endpoint: providerMetadata?.openrouter?.provider });
     return output;
   } catch (err) {
     return recoverSchemaMiss(err, "openrouter", config, schema);
