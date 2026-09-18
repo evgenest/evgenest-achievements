@@ -22,12 +22,22 @@ type ResultSchema = z.ZodType<LlmResult>;
 
 const RESULT_SCHEMA = z.strictObject(RESULT_SHAPE) as ResultSchema;
 
-function safeJsonParse(text: string): unknown {
+function parseJson(text: string): unknown {
   try {
     return JSON.parse(text);
   } catch {
     return undefined;
   }
+}
+
+// Endpoints without strict structured output (the fallback route, see callOpenRouter) tend to wrap
+// the object in a markdown fence or bracket it with a sentence — unwrap before giving up on it.
+function safeJsonParse(text: string): unknown {
+  const direct = parseJson(text.trim());
+  if (direct !== undefined) return direct;
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
+  const candidate = fenced ?? text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
+  return candidate ? parseJson(candidate.trim()) : undefined;
 }
 
 // For diagnosing schema mismatches the SHAPE of the answer is enough (which keys,
@@ -97,6 +107,10 @@ export function normalizeCommitMinutes(raw: unknown): unknown {
 
 export function normalizeLlmAnswer(raw: unknown): unknown {
   return normalizeCommitMinutes(normalizeProjectSummaries(raw));
+}
+
+function raise(err: unknown): never {
+  throw err;
 }
 
 function activityPrompt(input: unknown): string {
@@ -182,8 +196,9 @@ function logUsage(
 }
 
 // When the SDK rejects the model's structured output, the raw text often still holds a
-// valid (or reshapeable) object — recover it before giving up. Rethrows otherwise.
-function recoverSchemaMiss(err: unknown, provider: LlmProvider, config: Config, schema: ResultSchema): LlmResult {
+// valid (or reshapeable) object — recover it before giving up. `undefined` means the answer
+// is beyond saving and the caller decides whether to retry or rethrow.
+function recoverSchemaMiss(err: unknown, provider: LlmProvider, config: Config, schema: ResultSchema): LlmResult | undefined {
   if (NoObjectGeneratedError.isInstance(err)) logUsage(provider, config, err);
   if (NoObjectGeneratedError.isInstance(err) && err.text) {
     const parsed = safeJsonParse(err.text);
@@ -201,7 +216,7 @@ function recoverSchemaMiss(err: unknown, provider: LlmProvider, config: Config, 
       }),
     );
   }
-  throw err;
+  return undefined;
 }
 
 // Vercel AI Gateway: a single billing and routing point to the same models,
@@ -219,25 +234,101 @@ async function callVercel(env: Env, config: Config, schema: ResultSchema, instru
     logUsage("vercel", config, run);
     return output;
   } catch (err) {
-    return recoverSchemaMiss(err, "vercel", config, schema);
+    return recoverSchemaMiss(err, "vercel", config, schema) ?? raise(err);
   }
 }
 
+// Without structured output the schema is a request, not a guarantee — so it is spelled out
+// in the instructions instead. Only used on the fallback attempt (see callOpenRouter).
+function jsonOnlyInstructions(instructions: string, schema: ResultSchema): string {
+  return `${instructions}\n\nAnswer with a single JSON object and nothing else — no prose around it, no markdown fences. It must match this JSON Schema:\n${JSON.stringify(jsonSchemaForOpenAI(schema))}`;
+}
+
+function openRouterEndpoint(providerMetadata: unknown): unknown {
+  return (providerMetadata as { openrouter?: { provider?: unknown } } | undefined)?.openrouter?.provider;
+}
+
 // OpenRouter, locked to zero-data-retention endpoints (see openrouter.ts).
+async function strictViaOpenRouter(
+  env: Env,
+  config: Config,
+  schema: ResultSchema,
+  instructions: string,
+  input: unknown,
+): Promise<LlmResult> {
+  const { model } = openRouterZdr(env, config, { strictStructuredOutput: true });
+  const { output, usage, finishReason, providerMetadata } = await generateText({
+    model,
+    instructions,
+    prompt: activityPrompt(input),
+    output: Output.object({ schema }),
+  });
+  // The upstream endpoint that served the request (e.g. DeepInfra): output caps differ per endpoint.
+  logUsage("openrouter", config, { usage, finishReason, endpoint: openRouterEndpoint(providerMetadata) });
+  return output;
+}
+
+/**
+ * The fallback attempt, and the reason it asks for plain text: a request carrying
+ * `response_format: json_schema` (which `Output.object` adds) is routed by OpenRouter only to
+ * endpoints that support structured output — for this model exactly one, verified against the
+ * live API on 2026-09-18, and `require_parameters: false` does not widen it. Dropping the
+ * structured output is what actually opens the rest of the ZDR pool; the schema moves into the
+ * instructions and the answer is validated here.
+ */
+async function textViaOpenRouter(
+  env: Env,
+  config: Config,
+  schema: ResultSchema,
+  instructions: string,
+  input: unknown,
+): Promise<LlmResult> {
+  const { model } = openRouterZdr(env, config, { strictStructuredOutput: false });
+  const { text, usage, finishReason, providerMetadata } = await generateText({
+    model,
+    instructions: jsonOnlyInstructions(instructions, schema),
+    prompt: activityPrompt(input),
+  });
+  logUsage("openrouter", config, { usage, finishReason, endpoint: openRouterEndpoint(providerMetadata) });
+
+  const parsed = safeJsonParse(text);
+  const result = parsed !== undefined ? schema.safeParse(normalizeLlmAnswer(parsed)) : undefined;
+  if (result?.success) return result.data;
+
+  console.error(
+    JSON.stringify({
+      event: "llm_schema_mismatch",
+      provider: "openrouter",
+      model: config.llm.model,
+      output: describeLlmOutput(text, parsed),
+      error: result ? String(result.error) : "invalid JSON",
+    }),
+  );
+  throw new Error(`OpenRouter: response did not match schema (${result ? "validation failed" : "invalid JSON"})`);
+}
+
+/**
+ * Two attempts, both ZDR. The first asks for structured output, which for some models leaves
+ * exactly one eligible endpoint — an upstream rate limit there sank a whole weekly run on
+ * 2026-09-18. The second asks for plain JSON text instead, which is what opens the rest of the
+ * ZDR pool (see textViaOpenRouter). Data retention is never traded away — if no ZDR endpoint
+ * answers at all, the run fails.
+ */
 async function callOpenRouter(env: Env, config: Config, schema: ResultSchema, instructions: string, input: unknown): Promise<LlmResult> {
-  const { model } = openRouterZdr(env, config);
   try {
-    const { output, usage, finishReason, providerMetadata } = await generateText({
-      model,
-      instructions,
-      prompt: activityPrompt(input),
-      output: Output.object({ schema }),
-    });
-    // The upstream endpoint that served the request (e.g. DeepInfra): output caps differ per endpoint.
-    logUsage("openrouter", config, { usage, finishReason, endpoint: providerMetadata?.openrouter?.provider });
-    return output;
+    return await strictViaOpenRouter(env, config, schema, instructions, input);
   } catch (err) {
-    return recoverSchemaMiss(err, "openrouter", config, schema);
+    const recovered = recoverSchemaMiss(err, "openrouter", config, schema);
+    if (recovered) return recovered;
+    console.error(
+      JSON.stringify({
+        event: "llm_strict_endpoint_failed",
+        provider: "openrouter",
+        model: config.llm.model,
+        error: String(err).slice(0, 300),
+      }),
+    );
+    return textViaOpenRouter(env, config, schema, instructions, input);
   }
 }
 

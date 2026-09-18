@@ -57,7 +57,7 @@ describe("llm usage log", () => {
     ]);
   });
 
-  it("logs usage of a truncated answer before rethrowing", async () => {
+  it("logs usage of a truncated answer before the run moves on", async () => {
     const err = new NoObjectGeneratedError({
       message: "no object",
       text: '{"projectSummaries": [',
@@ -65,9 +65,11 @@ describe("llm usage log", () => {
       usage,
       finishReason: "length",
     });
-    gen.mockRejectedValueOnce(err);
+    // Unsalvageable, so the plain-text fallback attempt runs (see callOpenRouter) and rethrows
+    // its own failure — the usage of the truncated structured answer is logged either way.
+    gen.mockRejectedValueOnce(err).mockRejectedValueOnce(new Error("upstream down"));
 
-    await expect(generateInsights(env, config, makeWeek(), makeState(), 1, [])).rejects.toBe(err);
+    await expect(generateInsights(env, config, makeWeek(), makeState(), 1, [])).rejects.toThrow("upstream down");
     expect(usageEvents()).toMatchObject([{ finishReason: "length", reasoningTokens: 8_000 }]);
   });
 });
