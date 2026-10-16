@@ -40,6 +40,11 @@ function safeJsonParse(text: string): unknown {
   return candidate ? parseJson(candidate.trim()) : undefined;
 }
 
+// Keys the answer is allowed to carry. Anything else is a name the model made up, and the
+// shape it makes up most often is `projectSummaries` as an object keyed by repository name
+// (see normalizeProjectSummaries) — so unknown keys are counted, never named.
+const KNOWN_KEYS: ReadonlySet<string> = new Set([...Object.keys(RESULT_SHAPE), "repo", "summary", "id", "minutes"]);
+
 // For diagnosing schema mismatches the SHAPE of the answer is enough (which keys,
 // of what type, of what length) — the content itself never needs to reach the logs.
 function describeStructure(value: unknown): unknown {
@@ -48,16 +53,38 @@ function describeStructure(value: unknown): unknown {
     return { array: value.length, item: value.length > 0 ? describeStructure(value[0]) : undefined };
   }
   if (typeof value === "object") {
-    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, describeStructure(v)]));
+    const entries = Object.entries(value as Record<string, unknown>);
+    const known = entries.filter(([k]) => KNOWN_KEYS.has(k));
+    const invented = entries.length - known.length;
+    return {
+      ...Object.fromEntries(known.map(([k, v]) => [k, describeStructure(v)])),
+      ...(invented > 0 ? { inventedKeys: invented } : {}),
+    };
   }
   if (typeof value === "string") return `string(${value.length})`;
   return typeof value;
 }
 
-// If parsing failed the answer is not JSON at all and there is no structure to log;
-// only then does the (truncated) raw text get logged, because nothing else helps.
+// If parsing failed the answer is not JSON at all and there is no structure to describe —
+// so describe the shape of the text instead: how long it is and how it opens. The text itself
+// is the report, private project names included, and SECURITY.md promises the logs hold the
+// shape of the answer and not its content.
 function describeLlmOutput(rawText: string, parsed: unknown): unknown {
-  return parsed !== undefined ? { kind: "json", structure: describeStructure(parsed) } : { kind: "non-json", preview: rawText.slice(0, 300) };
+  if (parsed !== undefined) return { kind: "json", structure: describeStructure(parsed) };
+  const trimmed = rawText.trim();
+  return { kind: "non-json", length: rawText.length, fenced: trimmed.startsWith("```"), startsWithBrace: trimmed.startsWith("{") };
+}
+
+// Error names only. The SDK nests the model's whole raw answer in the message of the error it
+// wraps, so an error from the generation path is never stringified into a log.
+function errorName(err: unknown): string {
+  return err instanceof Error ? err.name : typeof err;
+}
+
+// Zod stringifies its issues with the offending values, and for `unrecognized_keys` those values
+// are keys the model invented — repository names, among other things. Codes and paths are enough.
+function describeSchemaIssues(error: z.ZodError): unknown {
+  return error.issues.map((issue) => ({ code: issue.code, path: issue.path.join(".") }));
 }
 
 function jsonSchemaForOpenAI(schema: ResultSchema) {
@@ -156,7 +183,7 @@ async function callOpenAI(env: Env, config: Config, schema: ResultSchema, instru
   const message = data.output?.find((o) => o.type === "message");
   const text = message?.content?.find((c) => c.type === "output_text")?.text;
   if (!text) {
-    throw new Error(`OpenAI: no output_text in response: ${JSON.stringify(data).slice(0, 500)}`);
+    throw new Error(`OpenAI: no output_text in response (parts: ${data.output?.map((o) => o.type).join(",") || "none"})`);
   }
   const parsed = safeJsonParse(text);
   const result = parsed !== undefined ? schema.safeParse(normalizeLlmAnswer(parsed)) : undefined;
@@ -168,7 +195,7 @@ async function callOpenAI(env: Env, config: Config, schema: ResultSchema, instru
       provider: "openai",
       model: config.llm.model,
       output: describeLlmOutput(text, parsed),
-      error: result ? String(result.error) : "invalid JSON",
+      error: result ? describeSchemaIssues(result.error) : "invalid JSON",
     }),
   );
   throw new Error(`OpenAI: response did not match schema (${result ? "validation failed" : "invalid JSON"})`);
@@ -211,7 +238,7 @@ function recoverSchemaMiss(err: unknown, provider: LlmProvider, config: Config, 
         provider,
         model: config.llm.model,
         output: describeLlmOutput(err.text, parsed),
-        cause: String(err.cause),
+        cause: errorName(err.cause),
         finishReason: err.finishReason,
       }),
     );
@@ -301,7 +328,7 @@ async function textViaOpenRouter(
       provider: "openrouter",
       model: config.llm.model,
       output: describeLlmOutput(text, parsed),
-      error: result ? String(result.error) : "invalid JSON",
+      error: result ? describeSchemaIssues(result.error) : "invalid JSON",
     }),
   );
   throw new Error(`OpenRouter: response did not match schema (${result ? "validation failed" : "invalid JSON"})`);
@@ -325,7 +352,7 @@ async function callOpenRouter(env: Env, config: Config, schema: ResultSchema, in
         event: "llm_strict_endpoint_failed",
         provider: "openrouter",
         model: config.llm.model,
-        error: String(err).slice(0, 300),
+        error: NoObjectGeneratedError.isInstance(err) ? errorName(err.cause) : String(err).slice(0, 300),
       }),
     );
     return textViaOpenRouter(env, config, schema, instructions, input);

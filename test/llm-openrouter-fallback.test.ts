@@ -89,6 +89,60 @@ describe("openrouter endpoint fallback", () => {
     expect(events().at(-1)).toMatchObject({ event: "llm_schema_mismatch", provider: "openrouter", output: { kind: "non-json" } });
   });
 
+  // S0. The answer IS the report — private project names and all — so no part of it may reach the
+  // logs, whichever way it turns out unusable. SECURITY.md promises the logs hold the shape of the
+  // answer and not its content; the canary below is what that promise means in practice.
+  describe("nothing of the answer reaches the logs", () => {
+    const canary = "ACME-CANARY-PROJECT";
+    const logged = () => err.mock.calls.map(([line]) => String(line)).join("\n");
+
+    it("keeps the raw text and the wrapped cause out of the log when the strict attempt misses", async () => {
+      gen
+        .mockRejectedValueOnce(
+          new NoObjectGeneratedError({
+            message: "no object",
+            cause: new TypeError(`Type validation failed: Value: {"praise":"${canary}"}`),
+            text: `Here is the week on ${canary}.`,
+            response: { id: "r", timestamp: new Date(0), modelId: "m" },
+            usage,
+            finishReason: "stop",
+          }),
+        )
+        .mockResolvedValueOnce(asText(JSON.stringify(answer)));
+
+      await expect(generateInsights(env, config, makeWeek(), makeState(), 1, [])).resolves.toEqual(answer);
+      expect(logged()).not.toContain(canary);
+      expect(events()).toMatchObject([
+        { event: "llm_schema_mismatch", cause: "TypeError", output: { kind: "non-json" } },
+        { event: "llm_strict_endpoint_failed", error: "TypeError" },
+      ]);
+    });
+
+    it("keeps unusable prose out of the log", async () => {
+      gen.mockRejectedValueOnce(new Error("upstream down")).mockResolvedValueOnce(asText(`I cannot help with ${canary}.`));
+
+      await expect(generateInsights(env, config, makeWeek(), makeState(), 1, [])).rejects.toThrow(/did not match schema/);
+      expect(logged()).not.toContain(canary);
+      expect(events().at(-1)).toMatchObject({ output: { kind: "non-json", fenced: false, startsWithBrace: false } });
+    });
+
+    // The weekly one: the model answers with projectSummaries keyed by repository name. Recovery
+    // handles that shape, but when the rest of the answer is still wrong the log used to print
+    // those keys verbatim.
+    it("counts the keys the model invented instead of naming them", async () => {
+      gen
+        .mockRejectedValueOnce(new Error("upstream down"))
+        .mockResolvedValueOnce(asText(JSON.stringify({ projectSummaries: { [`me/${canary}`]: "did things" }, commitMinutes: "not an array" })));
+
+      await expect(generateInsights(env, config, makeWeek(), makeState(), 1, [])).rejects.toThrow(/did not match schema/);
+      expect(logged()).not.toContain(canary);
+      expect(events().at(-1)).toMatchObject({ output: { kind: "json", structure: { projectSummaries: { inventedKeys: 1 } } } });
+      const issues = events().at(-1).error as Record<string, unknown>[];
+      expect(issues.length).toBeGreaterThan(0);
+      expect(issues.every((issue) => Object.keys(issue).sort().join() === "code,path")).toBe(true);
+    });
+  });
+
   it("does not retry when the structured attempt answered and the answer was recoverable", async () => {
     gen.mockRejectedValueOnce(
       new NoObjectGeneratedError({
